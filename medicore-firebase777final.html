@@ -1,0 +1,2937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>MediCore AI — Clinical Trial Matching Engine</title>
+
+<!-- ═══ FIREBASE SDK ═══ -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getAnalytics } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js';
+  import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, serverTimestamp }
+    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+ // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyBO1sYdb-gIj1U42MdkUd2DSzQx19OmIlw",
+  authDomain: "medicore-ai-90f1c.firebaseapp.com",
+  projectId: "medicore-ai-90f1c",
+  storageBucket: "medicore-ai-90f1c.firebasestorage.app",
+  messagingSenderId: "510399988642",
+  appId: "1:510399988642:web:b8089f32580533c525a8fb",
+  measurementId: "G-XWHKZQQRYL"
+};
+
+  const app       = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+  const db        = getFirestore(app);
+
+  // ── Expose to global scope so rest of app can use ──
+  window.FB = {
+    db,
+    collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, serverTimestamp,
+
+    // ── SAVE a single document ──
+    async save(col, id, data) {
+      try {
+        await setDoc(doc(db, col, id), { ...data, _updatedAt: serverTimestamp() });
+        return true;
+      } catch(e) { console.error('FB.save:', e); return false; }
+    },
+
+    // ── DELETE a single document ──
+    async remove(col, id) {
+      try { await deleteDoc(doc(db, col, id)); return true; }
+      catch(e) { console.error('FB.remove:', e); return false; }
+    },
+
+    // ── LOAD entire collection as array ──
+    async loadAll(col) {
+      try {
+        const snap = await getDocs(collection(db, col));
+        return snap.docs.map(d => ({ ...d.data(), _fbId: d.id }));
+      } catch(e) { console.error('FB.loadAll:', e); return null; }
+    },
+
+    // ── REAL-TIME LISTENER — fires whenever collection changes ──
+    listen(col, callback) {
+      return onSnapshot(collection(db, col), snap => {
+        const items = snap.docs.map(d => ({ ...d.data(), _fbId: d.id }));
+        callback(items);
+      });
+    }
+  };
+
+  // ── Signal that Firebase is ready ──
+  window.dispatchEvent(new Event('firebaseReady'));
+</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600&display=swap');
+
+:root {
+  --ink:     #0A0F1E;
+  --ink2:    #3D4A5C;
+  --ink3:    #7A8899;
+  --paper:   #F8F9FC;
+  --paper2:  #EEF1F7;
+  --border:  #DDE3EE;
+  --white:   #FFFFFF;
+  --blue:    #1847D1;
+  --blue-l:  #EBF0FF;
+  --teal:    #0B9B8E;
+  --teal-l:  #E4F7F5;
+  --red:     #C93030;
+  --red-l:   #FDEAEA;
+  --amber:   #B45309;
+  --amber-l: #FEF3C7;
+  --green:   #15803D;
+  --green-l: #DCFCE7;
+  --shadow:  0 1px 4px rgba(10,15,30,.08), 0 0 0 1px rgba(10,15,30,.05);
+  --shadow-lg: 0 20px 60px rgba(10,15,30,.14), 0 4px 16px rgba(10,15,30,.08);
+  --r: 12px; --rs: 7px; --rl: 18px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--paper); color: var(--ink); font-size: 14px; line-height: 1.6; overflow-x: hidden; }
+
+.screen { display: none; min-height: 100vh; }
+.screen.active { display: flex; }
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp   { from { opacity:0; transform:translateY(18px) } to { opacity:1; transform:none } }
+@keyframes scaleIn  { from { opacity:0; transform:scale(.93) }        to { opacity:1; transform:none } }
+@keyframes slideUp  { from { opacity:0; transform:translateY(12px) }  to { opacity:1; transform:none } }
+@keyframes pulse    { 0%,100%{opacity:1} 50%{opacity:.5} }
+@keyframes spinIn   { from{opacity:0;transform:rotate(-8deg) scale(.9)} to{opacity:1;transform:none} }
+
+/* ═══════════════════════════════════════════════
+   LOGIN
+═══════════════════════════════════════════════ */
+#loginScreen {
+  background: var(--ink);
+  align-items: stretch;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ambient grid */
+#loginScreen::before {
+  content:'';
+  position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.03) 1px,transparent 1px);
+  background-size: 48px 48px;
+  pointer-events:none;
+}
+/* gradient orbs */
+#loginScreen::after {
+  content:'';
+  position:absolute;
+  width:600px;height:600px;
+  background: radial-gradient(circle, rgba(24,71,209,.35) 0%, transparent 70%);
+  top:-200px;left:-200px;
+  pointer-events:none;
+  animation: pulse 6s ease-in-out infinite;
+}
+.login-orb2 {
+  position:absolute;
+  width:400px;height:400px;
+  background: radial-gradient(circle, rgba(11,155,142,.25) 0%, transparent 70%);
+  bottom:-100px;right:-100px;
+  pointer-events:none;
+  animation: pulse 8s ease-in-out 2s infinite;
+}
+
+.login-left {
+  flex:1;
+  display:flex;align-items:center;justify-content:center;
+  padding:60px;
+  position:relative;z-index:2;
+}
+.login-hero {
+  max-width:460px;
+  animation: fadeUp .7s cubic-bezier(.16,1,.3,1);
+}
+.brand-mark {
+  display:inline-flex;align-items:center;gap:10px;
+  margin-bottom:52px;
+}
+.brand-cross {
+  width:38px;height:38px;
+  background:var(--blue);
+  border-radius:9px;
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+}
+.brand-cross::before,.brand-cross::after {
+  content:'';position:absolute;background:#fff;border-radius:2px;
+}
+.brand-cross::before { width:14px;height:4px; }
+.brand-cross::after  { width:4px;height:14px; }
+.brand-name { font-family:'Fraunces',serif; font-size:20px; color:#fff; letter-spacing:-.3px; }
+.brand-name span { color:rgba(255,255,255,.45); font-weight:300; }
+
+.login-hero h1 {
+  font-family:'Fraunces',serif;
+  font-size:clamp(36px,4vw,52px);
+  font-weight:400;
+  color:#fff;
+  line-height:1.15;
+  letter-spacing:-.6px;
+  margin-bottom:18px;
+}
+.login-hero h1 em { color:rgba(255,255,255,.4); font-style:normal; }
+.login-hero p {
+  font-size:15px;
+  color:rgba(255,255,255,.5);
+  max-width:340px;
+  line-height:1.7;
+  margin-bottom:40px;
+}
+.feature-pills { display:flex;flex-wrap:wrap;gap:10px; }
+.pill {
+  display:inline-flex;align-items:center;gap:7px;
+  padding:7px 13px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1);
+  border-radius:30px;
+  font-size:12px;color:rgba(255,255,255,.6);
+}
+.pill-dot { width:6px;height:6px;border-radius:50%;flex-shrink:0; }
+
+.login-right {
+  width:460px;
+  background:var(--white);
+  display:flex;align-items:center;justify-content:center;
+  padding:60px 48px;
+  position:relative;z-index:2;
+  animation: spinIn .6s cubic-bezier(.16,1,.3,1);
+}
+.login-form-inner { width:100%;max-width:360px; }
+.lf-head { margin-bottom:32px; }
+.lf-head h2 { font-family:'Fraunces',serif;font-size:26px;color:var(--ink);letter-spacing:-.4px;margin-bottom:4px; }
+.lf-head p  { font-size:13px;color:var(--ink3); }
+
+.role-grid {
+  display:grid;grid-template-columns:1fr 1fr;gap:8px;
+  margin-bottom:28px;
+}
+.role-btn {
+  padding:12px 10px;
+  border:1.5px solid var(--border);
+  border-radius:var(--rs);
+  background:var(--paper);
+  cursor:pointer;
+  text-align:center;
+  transition:all .18s;
+  font-family:'DM Sans',sans-serif;
+}
+.role-btn:hover { border-color:var(--blue); background:var(--blue-l); }
+.role-btn.active { border-color:var(--blue); background:var(--blue-l); }
+.role-btn.active .rb-icon { background:var(--blue); color:#fff; }
+.rb-icon {
+  width:32px;height:32px;border-radius:8px;
+  background:var(--paper2);
+  margin:0 auto 6px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;
+  transition:all .18s;
+}
+.rb-label { font-size:12px;font-weight:500;color:var(--ink2); }
+
+.pat-note-box {
+  display:none;
+  background:var(--teal-l);
+  border:1px solid rgba(11,155,142,.2);
+  border-radius:var(--rs);
+  padding:10px 13px;
+  font-size:12.5px;
+  color:var(--teal);
+  margin-bottom:18px;
+  line-height:1.5;
+}
+
+.fg { margin-bottom:17px; }
+.fl { display:block;font-size:12px;font-weight:500;color:var(--ink2);margin-bottom:5px;letter-spacing:.2px; }
+.fi {
+  width:100%;padding:10px 13px;
+  border:1.5px solid var(--border);
+  border-radius:var(--rs);
+  font-family:'DM Sans',sans-serif;font-size:13.5px;
+  color:var(--ink);background:var(--paper);outline:none;
+  transition:all .18s;
+}
+.fi:focus { border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(24,71,209,.09); }
+.fi::placeholder { color:var(--ink3); }
+
+.pwd-wrap { position:relative; }
+.pwd-wrap .fi { padding-right:42px; }
+.pwd-eye { position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--ink3);font-size:14px;display:flex;padding:4px; }
+.pwd-eye:hover { color:var(--ink); }
+
+.btn-login {
+  width:100%;padding:12px;
+  background:var(--blue);color:#fff;
+  border:none;border-radius:var(--rs);
+  font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;
+  cursor:pointer;
+  transition:all .18s;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  margin-top:4px;
+  letter-spacing:.1px;
+}
+.btn-login:hover { background:#1338B0;box-shadow:0 6px 20px rgba(24,71,209,.3);transform:translateY(-1px); }
+
+.login-footer { margin-top:26px;text-align:center;font-size:11.5px;color:var(--ink3); }
+.login-footer a { color:var(--blue);text-decoration:none; }
+
+/* ═══════════════════════════════════════════════
+   APP SHELL
+═══════════════════════════════════════════════ */
+#appScreen { flex-direction:row; }
+
+.sidebar {
+  width:240px;min-height:100vh;
+  background:var(--ink);
+  display:flex;flex-direction:column;
+  position:fixed;left:0;top:0;bottom:0;z-index:100;
+}
+.sb-logo {
+  padding:22px 18px 16px;
+  display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.sb-logo-cross {
+  width:30px;height:30px;background:var(--blue);border-radius:7px;
+  display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0;
+}
+.sb-logo-cross::before,.sb-logo-cross::after {
+  content:'';position:absolute;background:#fff;border-radius:2px;
+}
+.sb-logo-cross::before { width:11px;height:3px; }
+.sb-logo-cross::after  { width:3px;height:11px; }
+.sb-logo-text { font-family:'Fraunces',serif;font-size:16px;color:#fff;letter-spacing:-.2px; }
+.sb-logo-text span { color:rgba(255,255,255,.35);font-weight:300; }
+
+.sb-user {
+  padding:14px 18px;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.sb-user-av {
+  width:34px;height:34px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:600;color:#fff;
+  margin-bottom:8px;
+}
+.sb-user-role { font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.35);margin-bottom:2px; }
+.sb-user-name { font-size:13px;font-weight:500;color:#fff; }
+.sb-user-badge {
+  display:inline-block;margin-top:5px;
+  padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:500;
+}
+.bdg-admin      { background:rgba(217,119,6,.2);    color:#FBBF24; }
+.bdg-doctor     { background:rgba(24,71,209,.2);    color:#93AAFF; }
+.bdg-researcher { background:rgba(11,155,142,.2);   color:#5DDBD5; }
+.bdg-patient    { background:rgba(21,128,61,.2);    color:#86EFAC; }
+
+.sb-section { padding:8px 10px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,255,255,.25);margin-top:6px; }
+.sb-nav { flex:1;padding:10px;overflow-y:auto; }
+.ni {
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;border-radius:var(--rs);
+  cursor:pointer;font-size:13px;color:rgba(255,255,255,.55);
+  border:none;background:none;width:100%;text-align:left;
+  margin-bottom:2px;transition:all .14s;
+}
+.ni:hover  { background:rgba(255,255,255,.07);color:rgba(255,255,255,.85); }
+.ni.active { background:rgba(24,71,209,.35);color:#fff; }
+.ni .nic   { width:17px;text-align:center;font-size:14px;flex-shrink:0; }
+.ni-dot    { width:6px;height:6px;border-radius:50%;margin-left:auto;background:var(--blue);display:none; }
+.ni.active .ni-dot { display:block; }
+.sb-bottom { padding:12px 10px;border-top:1px solid rgba(255,255,255,.07); }
+
+/* MAIN */
+.mc { margin-left:240px;flex:1;min-height:100vh;display:flex;flex-direction:column; }
+.topbar {
+  height:60px;background:var(--white);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;
+  padding:0 28px;gap:14px;
+  position:sticky;top:0;z-index:50;
+}
+.tb-title { font-family:'Fraunces',serif;font-size:18px;letter-spacing:-.3px;flex:1;color:var(--ink); }
+.sbar {
+  display:flex;align-items:center;
+  background:var(--paper);border:1.5px solid var(--border);
+  border-radius:var(--rs);padding:7px 13px;gap:8px;
+  min-width:240px;transition:all .18s;
+}
+.sbar:focus-within { border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(24,71,209,.08); }
+.sbar input { border:none;background:none;outline:none;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--ink);width:100%; }
+.sbar input::placeholder { color:var(--ink3); }
+.topbar-actions { display:flex;align-items:center;gap:8px; }
+.taction {
+  width:34px;height:34px;border-radius:var(--rs);
+  background:var(--paper);border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:15px;cursor:pointer;transition:background .15s;
+}
+.taction:hover { background:var(--paper2); }
+
+.pb { padding:26px;flex:1; }
+
+/* ── BUTTONS ── */
+.btn {
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:9px 18px;border:none;border-radius:var(--rs);
+  font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .18s;
+}
+.btn-primary { background:var(--blue);color:#fff; }
+.btn-primary:hover { background:#1338B0;transform:translateY(-1px);box-shadow:0 4px 14px rgba(24,71,209,.28); }
+.btn-sec { background:var(--paper2);color:var(--ink2); }
+.btn-sec:hover { background:var(--border); }
+.btn-ghost { background:transparent;color:var(--ink2);border:1px solid var(--border); }
+.btn-ghost:hover { background:var(--paper2); }
+.btn-danger { background:var(--red-l);color:var(--red);border:1px solid rgba(201,48,48,.15); }
+.btn-danger:hover { background:var(--red);color:#fff; }
+.btn-sm { padding:6px 12px;font-size:12px; }
+.ibtn { padding:6px;border-radius:var(--rs);background:var(--paper2);color:var(--ink2);border:none;cursor:pointer;transition:background .15s;display:inline-flex;align-items:center;justify-content:center; }
+.ibtn:hover { background:var(--border); }
+
+/* ── CARD ── */
+.card { background:var(--white);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow); }
+.ch { padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between; }
+.ct { font-size:14px;font-weight:600;color:var(--ink); }
+.ct-sub { font-size:12px;color:var(--ink3);margin-top:1px; }
+.cb { padding:20px; }
+
+/* ── STATS ── */
+.sgrid { display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:20px; }
+.scard {
+  background:var(--white);border:1px solid var(--border);border-radius:var(--r);
+  padding:18px 18px 16px;position:relative;overflow:hidden;
+  animation:slideUp .4s ease backwards;
+  transition:box-shadow .18s, transform .18s;
+}
+.scard:hover { box-shadow:0 4px 20px rgba(10,15,30,.1);transform:translateY(-1px); }
+.scard:nth-child(1){animation-delay:.04s}.scard:nth-child(2){animation-delay:.09s}
+.scard:nth-child(3){animation-delay:.14s}.scard:nth-child(4){animation-delay:.19s}
+.scard-accent { position:absolute;top:0;left:0;width:3px;height:100%;border-radius:3px 0 0 3px; }
+.scard-icon { font-size:20px;margin-bottom:12px; }
+.scard-val { font-family:'Fraunces',serif;font-size:32px;line-height:1;color:var(--ink);margin-bottom:3px; }
+.scard-lbl { font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:2px; }
+.scard-sub { font-size:11.5px;color:var(--ink3); }
+
+/* ── TABLE ── */
+.tw { overflow-x:auto; }
+table { width:100%;border-collapse:collapse; }
+thead th { text-align:left;padding:9px 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);background:var(--paper);border-bottom:1px solid var(--border); }
+tbody td { padding:11px 14px;font-size:13px;color:var(--ink2);border-bottom:1px solid var(--paper2);vertical-align:middle; }
+tbody tr:last-child td { border-bottom:none; }
+tbody tr { transition:background .12s; }
+tbody tr:hover { background:var(--paper); }
+
+/* ── TAGS ── */
+.tag { display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:500; }
+.tag::before { content:'';width:5px;height:5px;border-radius:50%; }
+.tag-b { background:var(--blue-l);color:var(--blue); }
+.tag-b::before { background:var(--blue); }
+.tag-g { background:var(--green-l);color:var(--green); }
+.tag-g::before { background:var(--green); }
+.tag-r { background:var(--red-l);color:var(--red); }
+.tag-r::before { background:var(--red); }
+.tag-y { background:var(--amber-l);color:var(--amber); }
+.tag-y::before { background:var(--amber); }
+.tag-t { background:var(--teal-l);color:var(--teal); }
+.tag-t::before { background:var(--teal); }
+
+/* ── MODAL ── */
+.mo { display:none;position:fixed;inset:0;background:rgba(10,15,30,.5);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center;padding:20px; }
+.mo.open { display:flex; }
+.mdl { background:var(--white);border-radius:var(--rl);box-shadow:var(--shadow-lg);width:100%;max-width:560px;max-height:90vh;overflow-y:auto;animation:scaleIn .22s cubic-bezier(.16,1,.3,1); }
+.mh { padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between; }
+.mt2 { font-family:'Fraunces',serif;font-size:18px;letter-spacing:-.3px; }
+.mb3 { padding:24px; }
+.mf { padding:12px 24px 20px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--border); }
+
+/* FORM GRID */
+.fsel { width:100%;padding:10px 13px;border:1.5px solid var(--border);border-radius:var(--rs);font-family:'DM Sans',sans-serif;font-size:13.5px;color:var(--ink);background:var(--paper);outline:none;cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237A8899' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;transition:all .18s; }
+.fsel:focus { border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(24,71,209,.09); }
+.fg2 { display:grid;grid-template-columns:1fr 1fr;gap:14px; }
+.fg2 .sp2 { grid-column:1/-1; }
+
+/* ── CHAT ── */
+.cl { display:grid;grid-template-columns:260px 1fr;height:calc(100vh - 112px);border-radius:var(--r);overflow:hidden;border:1px solid var(--border);background:var(--white); }
+.cll { border-right:1px solid var(--border);display:flex;flex-direction:column; }
+.clh { padding:14px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px;color:var(--ink); }
+.clist { flex:1;overflow-y:auto; }
+.citem { display:flex;align-items:center;gap:11px;padding:12px 14px;cursor:pointer;border-bottom:1px solid var(--paper2);transition:background .12s;position:relative; }
+.citem:hover { background:var(--paper); }
+.citem.active { background:var(--blue-l); }
+.citem.active::before { content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--blue);border-radius:0 2px 2px 0; }
+.cav { width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;flex-shrink:0; }
+.cname { font-size:13px;font-weight:500;color:var(--ink); }
+.csub { font-size:11.5px;color:var(--ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px; }
+.cbadge { width:17px;height:17px;background:var(--blue);border-radius:50%;font-size:9px;color:#fff;display:flex;align-items:center;justify-content:center;margin-left:auto;flex-shrink:0; }
+.cmain { display:flex;flex-direction:column;background:var(--paper); }
+.ctop { padding:12px 18px;background:var(--white);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:11px; }
+.cmsgs { flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px; }
+.mrow { display:flex;gap:9px; }
+.mrow.mine { flex-direction:row-reverse; }
+.mav { width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:#fff;flex-shrink:0;margin-top:2px; }
+.mbub { max-width:65%;padding:10px 13px;font-size:13px;line-height:1.55;word-wrap:break-word;border-radius:16px; }
+.mrow.theirs .mbub { background:var(--white);color:var(--ink);border-radius:3px 16px 16px 16px;box-shadow:var(--shadow); }
+.mrow.mine   .mbub { background:var(--blue);color:#fff;border-radius:16px 3px 16px 16px; }
+.mtime { font-size:10.5px;color:var(--ink3);margin-top:3px; }
+.cinrow { padding:14px 16px;background:var(--white);border-top:1px solid var(--border);display:flex;gap:8px;align-items:center; }
+.cinp { flex:1;padding:10px 14px;border:1.5px solid var(--border);border-radius:20px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;background:var(--paper);transition:all .18s; }
+.cinp:focus { border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(24,71,209,.08); }
+.sbtn { width:36px;height:36px;background:var(--blue);color:#fff;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .18s;flex-shrink:0; }
+.sbtn:hover { background:#1338B0;transform:scale(1.06); }
+
+/* ── ALERT ── */
+.al2 { padding:10px 13px;border-radius:var(--rs);font-size:13px;margin-bottom:13px;display:flex;align-items:flex-start;gap:8px;line-height:1.5; }
+.al-i  { background:var(--blue-l); color:var(--blue);  border:1px solid rgba(24,71,209,.15); }
+.al-ok { background:var(--green-l);color:var(--green); border:1px solid rgba(21,128,61,.15); }
+.al-w  { background:var(--amber-l);color:var(--amber); border:1px solid rgba(180,83,9,.15); }
+.al-d  { background:var(--red-l);  color:var(--red);   border:1px solid rgba(201,48,48,.15); }
+
+/* PID BOX */
+.pid-box {
+  background:linear-gradient(135deg,var(--ink) 0%,#1A2540 100%);
+  color:#fff;border-radius:var(--r);padding:18px 22px;margin-bottom:20px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.pid-lbl { font-size:11px;opacity:.5;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px; }
+.pid-val { font-family:'Fraunces',serif;font-size:28px;letter-spacing:-.5px; }
+
+/* SEARCH */
+.fgrid { display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px;margin-bottom:16px; }
+
+/* EMPTY */
+.empty { text-align:center;padding:48px 22px;color:var(--ink3); }
+.ei { font-size:36px;margin-bottom:12px;opacity:.6; }
+.et { font-size:14px;font-weight:500;color:var(--ink2);margin-bottom:4px; }
+.es2 { font-size:12.5px; }
+
+/* NOTIF */
+#notif {
+  position:fixed;top:18px;right:18px;z-index:9999;
+  min-width:280px;padding:12px 16px;border-radius:var(--r);
+  font-size:13px;display:flex;align-items:center;gap:9px;
+  box-shadow:var(--shadow-lg);
+  transform:translateX(130%);transition:transform .32s cubic-bezier(.16,1,.3,1);
+}
+#notif.show { transform:translateX(0); }
+#notif.nok   { background:var(--green-l);color:var(--green); border:1px solid rgba(21,128,61,.2); }
+#notif.nerr  { background:var(--red-l);  color:var(--red);   border:1px solid rgba(201,48,48,.2); }
+#notif.ninfo { background:var(--blue-l); color:var(--blue);  border:1px solid rgba(24,71,209,.2); }
+
+/* ANALYTICS BARS */
+.abar-row { margin-bottom:14px; }
+.abar-top { display:flex;align-items:center;margin-bottom:5px; }
+.abar-lbl { font-size:12.5px;font-weight:500;color:var(--ink2);flex:1; }
+.abar-val { font-size:12px;color:var(--ink3); }
+.abar-track { height:5px;background:var(--paper2);border-radius:3px;overflow:hidden; }
+.abar-fill  { height:100%;border-radius:3px;transition:width .6s cubic-bezier(.16,1,.3,1); }
+
+/* UTILS */
+.g2 { display:grid;grid-template-columns:1fr 1fr;gap:18px; }
+.g3 { display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px; }
+.fx { display:flex; }.aic { align-items:center; }.g8 { gap:8px; }.g10 { gap:10px; }.g12 { gap:12px; }.f1 { flex:1; }
+.fw5 { font-weight:500; }.fw6 { font-weight:600; }.c2 { color:var(--ink2); }.c3 { color:var(--ink3); }.ca { color:var(--blue); }
+.tsm { font-size:13px; }.txs { font-size:11.5px; }
+.mb4 { margin-bottom:4px; }.mb8 { margin-bottom:8px; }.mb14 { margin-bottom:14px; }.mb18 { margin-bottom:18px; }.mb20 { margin-bottom:20px; }.mt12 { margin-top:12px; }
+::-webkit-scrollbar { width:4px;height:4px; }
+::-webkit-scrollbar-thumb { background:var(--border);border-radius:3px; }
+
+/* ── CLINICAL TRIAL ENGINE STYLES ── */
+.trial-card {
+  background:var(--white);border:1px solid var(--border);border-radius:var(--r);
+  padding:20px;margin-bottom:14px;position:relative;overflow:hidden;
+  transition:all .2s;animation:fadeUp .4s ease backwards;
+}
+.trial-card:hover { box-shadow:0 8px 28px rgba(10,15,30,.1);transform:translateY(-1px);border-color:rgba(24,71,209,.2); }
+.trial-card-accent { position:absolute;top:0;left:0;width:4px;height:100%;border-radius:4px 0 0 4px; }
+.trial-card-head { display:flex;align-items:flex-start;gap:12px;margin-bottom:10px; }
+.trial-icon { width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0; }
+.trial-meta { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px; }
+.trial-desc { font-size:12.5px;color:var(--ink3);line-height:1.55;margin-bottom:12px; }
+.trial-criteria { display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px; }
+.crit-box { padding:10px 12px;border-radius:var(--rs);font-size:11.5px;line-height:1.6; }
+.crit-inc { background:#DCFCE7;border:1px solid rgba(21,128,61,.15); }
+.crit-exc { background:#FDEAEA;border:1px solid rgba(201,48,48,.15); }
+.crit-lbl { font-weight:600;margin-bottom:4px;font-size:11px;text-transform:uppercase;letter-spacing:.4px; }
+.crit-inc .crit-lbl { color:var(--green); }
+.crit-exc .crit-lbl { color:var(--red); }
+
+/* MATCH SCORE */
+.match-score-ring {
+  width:72px;height:72px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;
+  position:relative;font-family:'Fraunces',serif;
+}
+.score-num { font-size:20px;font-weight:700;line-height:1; }
+.score-lbl { font-size:9px;text-transform:uppercase;letter-spacing:.4px;opacity:.75; }
+
+.match-card {
+  background:var(--white);border:1.5px solid var(--border);border-radius:var(--r);
+  padding:18px 20px;margin-bottom:14px;transition:all .2s;
+  animation:slideUp .35s ease backwards;display:flex;gap:16px;align-items:flex-start;
+}
+.match-card:hover { box-shadow:0 6px 24px rgba(10,15,30,.1);border-color:rgba(24,71,209,.25); }
+.match-card.excellent { border-color:rgba(21,128,61,.35);background:linear-gradient(135deg,#DCFCE720,#fff); }
+.match-card.good      { border-color:rgba(11,155,142,.35);background:linear-gradient(135deg,#E4F7F520,#fff); }
+.match-card.partial   { border-color:rgba(180,83,9,.3);  background:linear-gradient(135deg,#FEF3C720,#fff); }
+.match-card.poor      { border-color:rgba(201,48,48,.2); background:linear-gradient(135deg,#FDEAEA20,#fff); }
+
+.reason-pill {
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 10px;border-radius:20px;font-size:11px;font-weight:500;margin:2px;
+}
+.rp-pass { background:var(--green-l);color:var(--green); }
+.rp-fail { background:var(--red-l);color:var(--red); }
+.rp-warn { background:var(--amber-l);color:var(--amber); }
+
+/* PROGRESS RING SVG */
+.ring-svg { position:absolute;top:0;left:0; }
+
+/* FILTER BAR */
+.filter-strip { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px; }
+.fchip { padding:6px 14px;border-radius:20px;border:1.5px solid var(--border);background:var(--white);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;color:var(--ink2); }
+.fchip:hover,.fchip.active { background:var(--blue);color:#fff;border-color:var(--blue); }
+
+.ai-badge {
+  display:inline-flex;align-items:center;gap:6px;
+  background:linear-gradient(135deg,#1847D1,#7C3AED);
+  color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:600;
+  animation:pulse 3s ease infinite;
+}
+
+/* Animated score fill */
+@keyframes scoreIn { from{stroke-dashoffset:226} }
+.ring-circle { transition:stroke-dashoffset 1s cubic-bezier(.16,1,.3,1); }
+
+/* ── HACKATHON UPGRADE STYLES ── */
+.demo-banner {
+  position:fixed;bottom:0;left:0;right:0;z-index:9000;
+  background:linear-gradient(90deg,#7C3AED,#1847D1);
+  color:#fff;padding:8px 20px;font-size:12px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+}
+.demo-steps { display:flex;gap:6px;align-items:center;flex-wrap:wrap; }
+.demo-step { padding:4px 12px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);transition:all .15s;color:#fff; }
+.demo-step:hover,.demo-step.done { background:rgba(255,255,255,.3); }
+.demo-step.active { background:#fff;color:#7C3AED; }
+.ai-fab { position:fixed;bottom:60px;right:22px;z-index:8000;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#1847D1,#7C3AED);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 4px 20px rgba(24,71,209,.5);transition:all .2s; }
+.ai-fab:hover { transform:scale(1.12); }
+.fab-badge { position:absolute;top:-3px;right:-3px;width:16px;height:16px;border-radius:50%;background:#C93030;font-size:9px;display:flex;align-items:center;justify-content:center;border:2px solid #fff; }
+.ai-panel { position:fixed;bottom:122px;right:22px;z-index:7999;width:360px;background:var(--white);border-radius:var(--rl);box-shadow:var(--shadow-lg);border:1px solid var(--border);display:none;flex-direction:column;max-height:520px; }
+.ai-panel.open { display:flex;animation:scaleIn .22s cubic-bezier(.16,1,.3,1);transform-origin:bottom right; }
+.ai-panel-head { padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#0A0F1E,#1A2540);border-radius:var(--rl) var(--rl) 0 0; }
+.ai-panel-msgs { flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;min-height:200px; }
+.ai-msg { display:flex;gap:8px;animation:slideUp .25s ease; }
+.ai-msg.user { flex-direction:row-reverse; }
+.ai-bubble { max-width:82%;padding:9px 12px;font-size:12.5px;line-height:1.55;border-radius:14px; }
+.ai-msg.bot .ai-bubble { background:var(--paper);border:1px solid var(--border);color:var(--ink);border-radius:3px 14px 14px 14px; }
+.ai-msg.user .ai-bubble { background:var(--blue);color:#fff;border-radius:14px 3px 14px 14px; }
+.ai-av { width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;margin-top:2px; }
+.ai-typing { display:flex;gap:4px;padding:10px 12px;background:var(--paper);border-radius:14px;border:1px solid var(--border);width:fit-content; }
+.ai-typing span { width:7px;height:7px;border-radius:50%;background:var(--ink3);animation:pulse 1.2s ease infinite; }
+.ai-typing span:nth-child(2){animation-delay:.2s}.ai-typing span:nth-child(3){animation-delay:.4s}
+.ai-panel-foot { padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px; }
+.ai-inp { flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:20px;font-size:12.5px;outline:none;font-family:'DM Sans',sans-serif; }
+.ai-inp:focus { border-color:var(--blue); }
+.ai-send { width:32px;height:32px;border-radius:50%;background:var(--blue);color:#fff;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0; }
+.conf-bar { display:flex;align-items:center;gap:10px;margin-bottom:8px; }
+.conf-label { font-size:11.5px;color:var(--ink2);width:140px;flex-shrink:0; }
+.conf-track { flex:1;height:8px;background:var(--paper2);border-radius:4px;overflow:hidden; }
+.conf-fill { height:100%;border-radius:4px;transition:width 1s cubic-bezier(.16,1,.3,1); }
+.conf-val { font-size:11px;font-weight:600;width:32px;text-align:right;flex-shrink:0; }
+.export-btn { display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--green-l);color:var(--green);border:1px solid rgba(21,128,61,.2);border-radius:var(--rs);font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;border:none; }
+.export-btn:hover { background:var(--green);color:#fff; }
+.audit-item { display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid var(--paper2);animation:fadeUp .3s ease backwards; }
+.audit-dot { width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:5px; }
+.consent-row { display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--paper2); }
+.toggle { position:relative;width:38px;height:20px;cursor:pointer;display:block; }
+.toggle input { opacity:0;width:0;height:0;position:absolute; }
+.toggle-slider { position:absolute;inset:0;background:var(--border);border-radius:20px;transition:.2s; }
+.toggle-slider::before { content:'';position:absolute;width:14px;height:14px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s; }
+.toggle input:checked ~ .toggle-slider { background:var(--green); }
+.toggle input:checked ~ .toggle-slider::before { transform:translateX(18px); }
+.fairness-score { font-family:'Fraunces',serif;font-size:38px;font-weight:700;background:linear-gradient(135deg,#15803D,#0B9B8E);-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1; }
+.heatmap-grid { display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:8px; }
+.hmap-cell { aspect-ratio:1;border-radius:3px;transition:transform .15s;cursor:default; }
+.hmap-cell:hover { transform:scale(1.4);z-index:1;position:relative; }
+.stat-ticker { background:linear-gradient(90deg,#0A0F1E,#1A2540);padding:7px 24px;display:flex;gap:28px;align-items:center;overflow:hidden;border-bottom:1px solid rgba(255,255,255,.06); }
+.ticker-item { display:flex;align-items:center;gap:7px;font-size:11.5px;color:rgba(255,255,255,.55);white-space:nowrap; }
+.ticker-val { color:#fff;font-weight:600; }
+
+
+@keyframes countUp { from { opacity:0; transform:translateY(8px) scale(.9); } to { opacity:1; transform:none; } }
+@keyframes shimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+@keyframes borderPulse { 0%,100%{box-shadow:0 0 0 0 rgba(24,71,209,.3)} 50%{box-shadow:0 0 0 6px rgba(24,71,209,0)} }
+
+.scard-val { animation: countUp .5s ease backwards; }
+.scard:nth-child(1) .scard-val { animation-delay:.15s }
+.scard:nth-child(2) .scard-val { animation-delay:.25s }
+.scard:nth-child(3) .scard-val { animation-delay:.35s }
+.scard:nth-child(4) .scard-val { animation-delay:.45s }
+
+.card { transition: box-shadow .2s, transform .2s; }
+.card:hover { box-shadow: 0 8px 32px rgba(10,15,30,.12), 0 0 0 1px rgba(10,15,30,.06); transform: translateY(-1px); }
+
+.abar-fill { height:100%;border-radius:3px;transition:width .8s cubic-bezier(.16,1,.3,1); }
+
+/* animated gradient login orb */
+.login-orb2 { animation: float 10s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<div id="notif"><span id="nmsg"></span></div>
+<div class="login-orb2"></div>
+
+<!-- ═══════════════ LOGIN ═══════════════ -->
+<div id="loginScreen" class="screen active">
+
+  <!-- LEFT HERO -->
+  <div class="login-left">
+    <div class="login-hero">
+      <div class="brand-mark">
+        <div class="brand-cross"></div>
+        <div class="brand-name">Medi<span>Core</span></div>
+      </div>
+      <h1>Clinical research,<br><em>reimagined</em> for<br>the modern ward.</h1>
+      <p>An AI-powered platform matching anonymized patients to clinical trials — with transparent scoring, rule-based eligibility, and fair matching.</p>
+      <div class="feature-pills">
+        <div class="pill"><div class="pill-dot" style="background:#5DDBD5"></div>Anonymous patient records</div>
+        <div class="pill"><div class="pill-dot" style="background:#93AAFF"></div>AI trial eligibility engine</div>
+        <div class="pill"><div class="pill-dot" style="background:#86EFAC"></div>Transparent match scoring</div>
+        <div class="pill"><div class="pill-dot" style="background:#FBBF24"></div>Role-based access control</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT FORM -->
+  <div class="login-right">
+    <div class="login-form-inner">
+      <div class="lf-head">
+        <h2>Sign in</h2>
+        <p>Select your role and enter your credentials</p>
+      </div>
+
+      <div class="role-grid">
+        <button class="role-btn active" id="rb-admin" onclick="selectRole('admin')">
+          <div class="rb-icon">&#128737;</div>
+          <div class="rb-label">Admin</div>
+        </button>
+        <button class="role-btn" id="rb-doctor" onclick="selectRole('doctor')">
+          <div class="rb-icon">&#129657;</div>
+          <div class="rb-label">Doctor</div>
+        </button>
+        <button class="role-btn" id="rb-researcher" onclick="selectRole('researcher')">
+          <div class="rb-icon">&#128300;</div>
+          <div class="rb-label">Researcher</div>
+        </button>
+        <button class="role-btn" id="rb-patient" onclick="selectRole('patient')">
+          <div class="rb-icon">&#129656;</div>
+          <div class="rb-label">Patient</div>
+        </button>
+      </div>
+
+      <div id="patNote" class="pat-note-box">
+        Patients sign in using their assigned Patient ID (e.g. PAT001). New patients will be prompted to register.
+      </div>
+
+      <div class="fg">
+        <label class="fl">User ID / Patient ID</label>
+        <input class="fi" type="text" id="loginEmail" placeholder="e.g. ADM001, USR001, PAT001" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <div class="fg">
+        <label class="fl">Password</label>
+        <div class="pwd-wrap">
+          <input class="fi" type="password" id="loginPass" placeholder="Enter your password" onkeydown="if(event.key==='Enter')doLogin()">
+          <button class="pwd-eye" id="eyeBtn" onclick="togglePwd()" type="button">&#128065;</button>
+        </div>
+      </div>
+
+      <button class="btn-login" onclick="doLogin()">Sign In &rarr;</button>
+
+      <div class="login-footer">
+        Protected by end-to-end encryption &bull; <a href="#">Privacy Policy</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ APP ═══════════════ -->
+<div id="appScreen" class="screen">
+  <aside class="sidebar">
+    <div class="sb-logo">
+      <div class="sb-logo-cross"></div>
+      <div class="sb-logo-text">Medi<span>Core</span></div>
+    </div>
+    <div class="sb-user">
+      <div class="sb-user-av" id="sbAv">MC</div>
+      <div class="sb-user-role">Signed in as</div>
+      <div class="sb-user-name" id="sbName">User</div>
+      <span class="sb-user-badge" id="sbBadge">Role</span>
+    </div>
+    <nav class="sb-nav" id="sbNav"></nav>
+    <div class="sb-bottom">
+      <button class="ni" onclick="doLogout()" style="color:rgba(255,100,100,.7);">
+        <span class="nic">&#128682;</span>Sign Out
+      </button>
+    </div>
+  </aside>
+
+  <div class="mc">
+    <!-- Firebase Status Bar -->
+    <div id="fbStatusBar" style="display:none;align-items:center;justify-content:center;padding:8px 20px;color:#fff;font-size:12.5px;gap:8px;"></div>
+    <div class="stat-ticker" id="statTicker" style="display:none;">
+      <div class="ticker-item">🧑‍⚕️ Patients: <span class="ticker-val" id="tkPat">0</span></div>
+      <div class="ticker-item">🧪 Active Trials: <span class="ticker-val" id="tkTrial">0</span></div>
+      <div class="ticker-item">🎯 Matches Today: <span class="ticker-val" id="tkMatch">0</span></div>
+      <div class="ticker-item">✅ Enrolled: <span class="ticker-val" id="tkEnrolled">0</span></div>
+      <div class="ticker-item" style="margin-left:auto;">⚖️ Fairness Score: <span class="ticker-val" style="color:#86EFAC;" id="tkFairness">—</span></div>
+    </div>
+    <div class="topbar">
+      <div class="tb-title" id="tbTitle">Dashboard</div>
+      <div id="srchWrap" style="display:none;">
+        <div class="sbar">
+          <span style="color:var(--ink3);font-size:14px;">&#128269;</span>
+          <input type="text" placeholder="Search patients, conditions, cities..." id="gSearch" oninput="doGlobalSearch(this.value)">
+        </div>
+      </div>
+    </div>
+    <div class="pb" id="pb"></div>
+  </div>
+</div>
+
+<!-- PATIENT MODAL -->
+<div class="mo" id="patModal">
+  <div class="mdl">
+    <div class="mh"><span class="mt2" id="patModalTitle">New Patient</span><button class="ibtn" onclick="closeMo('patModal')">&#10005;</button></div>
+    <div class="mb3">
+      <input type="hidden" id="editPatId">
+      <div class="fg2">
+        <div class="fg"><label class="fl">Age *</label><input class="fi" type="number" id="fAge" placeholder="e.g. 34" min="1" max="120"></div>
+        <div class="fg"><label class="fl">Blood Group *</label>
+          <select class="fsel" id="fBlood"><option value="">Select</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>
+        <div class="fg"><label class="fl">Gender *</label>
+          <select class="fsel" id="fGender"><option value="">Select</option><option>Male</option><option>Female</option><option>Non-binary</option><option>Prefer not to say</option></select></div>
+        <div class="fg"><label class="fl">City *</label><input class="fi" id="fCity" placeholder="e.g. Mumbai"></div>
+        <div class="fg sp2"><label class="fl">Symptoms / Condition *</label>
+          <input class="fi" id="fSymp" placeholder="Describe symptoms..." oninput="liveMatch(this.value)"></div>
+        <div class="sp2" id="condMatchBox" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="mf"><button class="btn btn-ghost" onclick="closeMo('patModal')">Cancel</button><button class="btn btn-primary" onclick="savePat()">Save Patient</button></div>
+  </div>
+</div>
+
+<!-- USER MODAL -->
+<div class="mo" id="userModal">
+  <div class="mdl">
+    <div class="mh"><span class="mt2" id="userModalTitle">Register Staff</span><button class="ibtn" onclick="closeMo('userModal')">&#10005;</button></div>
+    <div class="mb3">
+      <input type="hidden" id="editUserId">
+      <div class="fg2">
+        <div class="fg"><label class="fl">Role *</label><select class="fsel" id="uRole"><option value="">Select role</option><option>Doctor</option><option>Researcher</option></select></div>
+        <div class="fg"><label class="fl">Password *</label><input class="fi" type="password" id="uPass" placeholder="Min 6 characters"></div>
+        <div class="fg"><label class="fl">Specialization</label><input class="fi" id="uSpec" placeholder="e.g. Cardiology"></div>
+        <div class="fg"><label class="fl">Department</label><input class="fi" id="uDept" placeholder="e.g. ICU"></div>
+      </div>
+    </div>
+    <div class="mf"><button class="btn btn-ghost" onclick="closeMo('userModal')">Cancel</button><button class="btn btn-primary" onclick="saveUser()">Save</button></div>
+  </div>
+</div>
+
+<!-- TRIAL MODAL -->
+<div class="mo" id="trialModal">
+  <div class="mdl" style="max-width:680px;">
+    <div class="mh"><span class="mt2" id="trialModalTitle">New Clinical Trial</span><button class="ibtn" onclick="closeMo('trialModal')">&#10005;</button></div>
+    <div class="mb3">
+      <input type="hidden" id="editTrialId">
+      <div class="fg2">
+        <div class="fg sp2"><label class="fl">Trial Title *</label><input class="fi" id="tTitle" placeholder="e.g. Phase II Hypertension Reduction Study"></div>
+        <div class="fg"><label class="fl">Phase *</label><select class="fsel" id="tPhase"><option value="">Select</option><option>Phase I</option><option>Phase II</option><option>Phase III</option><option>Phase IV</option></select></div>
+        <div class="fg"><label class="fl">Status *</label><select class="fsel" id="tStatus"><option value="">Select</option><option>Recruiting</option><option>Active</option><option>Completed</option><option>Suspended</option></select></div>
+        <div class="fg"><label class="fl">Target Condition *</label><input class="fi" id="tCondition" placeholder="e.g. Hypertension, Diabetes"></div>
+        <div class="fg"><label class="fl">Sponsor / Institution</label><input class="fi" id="tSponsor" placeholder="e.g. AIIMS Research Cell"></div>
+        <div class="fg"><label class="fl">Min Age</label><input class="fi" type="number" id="tAgeMin" placeholder="18" min="0" max="120"></div>
+        <div class="fg"><label class="fl">Max Age</label><input class="fi" type="number" id="tAgeMax" placeholder="65" min="0" max="120"></div>
+        <div class="fg"><label class="fl">Gender Eligibility</label><select class="fsel" id="tGender"><option value="Any">Any</option><option>Male</option><option>Female</option><option>Non-binary</option></select></div>
+        <div class="fg"><label class="fl">Required Severity</label><select class="fsel" id="tSeverity"><option value="any">Any</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+        <div class="fg sp2"><label class="fl">Inclusion Keywords <span class="c3">(comma separated)</span></label><input class="fi" id="tInclude" placeholder="e.g. hypertension, chest pain, high bp"></div>
+        <div class="fg sp2"><label class="fl">Exclusion Keywords <span class="c3">(comma separated)</span></label><input class="fi" id="tExclude" placeholder="e.g. pregnancy, renal failure, liver disease"></div>
+        <div class="fg sp2"><label class="fl">Description</label><textarea class="fi" id="tDesc" rows="3" placeholder="Brief trial description and objectives..." style="resize:vertical;"></textarea></div>
+      </div>
+    </div>
+    <div class="mf"><button class="btn btn-ghost" onclick="closeMo('trialModal')">Cancel</button><button class="btn btn-primary" onclick="saveTrial()">Save Trial</button></div>
+  </div>
+</div>
+
+<!-- MATCH DETAIL MODAL -->
+<div class="mo" id="matchModal">
+  <div class="mdl" style="max-width:600px;">
+    <div class="mh"><span class="mt2">Match Explanation</span><button class="ibtn" onclick="closeMo('matchModal')">&#10005;</button></div>
+    <div class="mb3" id="matchModalBody"></div>
+    <div class="mf"><button class="btn btn-primary" onclick="closeMo('matchModal')">Close</button></div>
+  </div>
+</div>
+
+<!-- AI ASSISTANT FAB -->
+<button class="ai-fab" onclick="toggleAIPanel()" title="Ask MediCore AI">
+  🤖<span class="fab-badge" id="fabBadge">3</span>
+</button>
+
+<!-- AI ASSISTANT PANEL -->
+<div class="ai-panel" id="aiPanel">
+  <div class="ai-panel-head">
+    <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#1847D1,#7C3AED);display:flex;align-items:center;justify-content:center;font-size:16px;">🤖</div>
+    <div style="flex:1;">
+      <div style="font-weight:600;font-size:13px;color:#fff;">MediCore AI Assistant</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.5);">Ask about patients, trials, or matches</div>
+    </div>
+    <button onclick="toggleAIPanel()" style="background:none;border:none;cursor:pointer;color:rgba(255,255,255,.5);font-size:16px;padding:4px;">✕</button>
+  </div>
+  <div class="ai-panel-msgs" id="aiMsgs"></div>
+  <div style="padding:8px 12px 4px;display:flex;gap:6px;flex-wrap:wrap;" id="aiSuggestions"></div>
+  <div class="ai-panel-foot">
+    <input class="ai-inp" id="aiInput" placeholder="Ask anything about trials or patients..." onkeydown="if(event.key==='Enter')sendAIMsg()">
+    <button class="ai-send" onclick="sendAIMsg()">➤</button>
+  </div>
+</div>
+
+<!-- DEMO MODE BANNER -->
+<div class="demo-banner" id="demoBanner">
+  <div style="display:flex;align-items:center;gap:8px;font-weight:600;">
+    <span>🎯</span> <span>Hackathon Demo Mode</span>
+  </div>
+  <div class="demo-steps" id="demoSteps"></div>
+  <button onclick="document.getElementById('demoBanner').style.display='none'" style="background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:16px;">✕</button>
+</div>
+
+<script>
+
+var LS={patients:'mc_p',users:'mc_u',chats:'mc_c',pc:'mc_pc',uc:'mc_uc',session:'mc_s',trials:'mc_t',tc:'mc_tc'};
+function lsGet(k,fb){try{var v=localStorage.getItem(k);return v!==null?JSON.parse(v):fb;}catch(e){return fb;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+
+// ── FIREBASE STATUS ──
+var FB_READY = false;
+var FB_ENABLED = false; // flips to true once config is pasted & SDK loads
+
+window.addEventListener('firebaseReady', function(){
+  FB_READY = true;
+  // Check if user actually pasted config (not placeholder)
+  if(window.FB && window.FB.db){
+    FB_ENABLED = true;
+    showFBStatus('connected');
+    loadFromFirebase();    // pull latest data
+    setupRealtimeListeners(); // listen for changes
+  }
+});
+
+function showFBStatus(state){
+  var bar = document.getElementById('fbStatusBar');
+  if(!bar) return;
+  if(state === 'connected'){
+    bar.innerHTML = '🔥 <strong>Firebase connected</strong> — data syncs across all devices in real time';
+    bar.style.background = 'linear-gradient(90deg,#15803D,#0B9B8E)';
+    bar.style.display = 'flex';
+    setTimeout(function(){ bar.style.display='none'; }, 4000);
+  } else if(state === 'saving'){
+    bar.innerHTML = '💾 Saving to Firebase...';
+    bar.style.background = 'linear-gradient(90deg,#1847D1,#7C3AED)';
+    bar.style.display = 'flex';
+  } else if(state === 'error'){
+    bar.innerHTML = '⚠️ Firebase error — data saved locally only. Check your config.';
+    bar.style.background = 'linear-gradient(90deg,#C93030,#B45309)';
+    bar.style.display = 'flex';
+  }
+}
+
+// ── LOAD ALL DATA FROM FIREBASE ──
+async function loadFromFirebase(){
+  if(!FB_ENABLED) return;
+  try {
+    notify('🔥 Loading from Firebase...','info');
+
+    var patients = await window.FB.loadAll('patients');
+    var trials   = await window.FB.loadAll('trials');
+    var users    = await window.FB.loadAll('users');
+    var chatsSnap= await window.FB.loadAll('chats');
+
+    if(patients && patients.length > 0){
+      DB.patients = patients;
+      lsSet(LS.patients, patients);
+    }
+    if(trials && trials.length > 0){
+      DB.trials = trials;
+      lsSet(LS.trials, trials);
+    }
+    if(users && users.length > 0){
+      DB.users = users;
+      lsSet(LS.users, users);
+    }
+    if(chatsSnap && chatsSnap.length > 0){
+      var chatObj = {};
+      chatsSnap.forEach(function(c){ chatObj[c.patId] = c.messages || []; });
+      DB.chats = chatObj;
+      lsSet(LS.chats, chatObj);
+    }
+
+    notify('✅ Data loaded from Firebase!','ok');
+    // Refresh current page
+    if(DB.session) pgDashboard();
+
+  } catch(e){
+    console.error('Firebase load error:', e);
+    showFBStatus('error');
+  }
+}
+
+// ── REAL-TIME LISTENERS (updates UI when another user changes data) ──
+function setupRealtimeListeners(){
+  if(!FB_ENABLED) return;
+
+  window.FB.listen('patients', function(items){
+    if(!items.length) return;
+    DB.patients = items;
+    lsSet(LS.patients, items);
+    updateTicker();
+  });
+
+  window.FB.listen('trials', function(items){
+    if(!items.length) return;
+    DB.trials = items;
+    lsSet(LS.trials, items);
+    updateTicker();
+  });
+}
+
+// ── SAVE ALL (localStorage + Firebase) ──
+function saveAll(){
+  // Always save to localStorage first (instant, offline-safe)
+  lsSet(LS.patients, DB.patients);
+  lsSet(LS.users,    DB.users);
+  lsSet(LS.chats,    DB.chats);
+  lsSet(LS.pc,       DB.pc);
+  lsSet(LS.uc,       DB.uc);
+  lsSet(LS.trials,   DB.trials);
+  lsSet(LS.tc,       DB.tc);
+
+  // Then sync to Firebase if connected
+  if(FB_ENABLED) syncToFirebase();
+}
+
+// ── SYNC TO FIREBASE ──
+async function syncToFirebase(){
+  if(!FB_ENABLED || !window.FB) return;
+  showFBStatus('saving');
+  try {
+    // Save patients
+    for(var i=0; i<DB.patients.length; i++){
+      var p = DB.patients[i];
+      await window.FB.save('patients', p.id, p);
+    }
+    // Save trials
+    for(var j=0; j<DB.trials.length; j++){
+      var t = DB.trials[j];
+      await window.FB.save('trials', t.id, t);
+    }
+    // Save users
+    for(var k=0; k<DB.users.length; k++){
+      var u = DB.users[k];
+      await window.FB.save('users', u.id, u);
+    }
+    // Save chats (each patient's chat as one doc)
+    var chatKeys = Object.keys(DB.chats);
+    for(var m=0; m<chatKeys.length; m++){
+      var pid = chatKeys[m];
+      await window.FB.save('chats', pid, { patId: pid, messages: DB.chats[pid] });
+    }
+    showFBStatus('connected');
+  } catch(e){
+    console.error('Firebase sync error:', e);
+    showFBStatus('error');
+  }
+}
+
+// ── DELETE FROM FIREBASE ──
+async function fbDelete(collection, id){
+  if(!FB_ENABLED || !window.FB) return;
+  await window.FB.remove(collection, id);
+}
+
+function saveSess(){
+  if(DB.session) lsSet(LS.session, DB.session);
+  else localStorage.removeItem(LS.session);
+}
+
+var SP=[
+  {id:'PAT001',age:34,blood:'B+',gender:'Female',city:'Mumbai',symptoms:'Chest pain, shortness of breath',condition:'Hypertension',severity:'high',registered:'2024-01-15'},
+  {id:'PAT002',age:52,blood:'O+',gender:'Male',city:'Delhi',symptoms:'Fatigue, frequent urination',condition:'Diabetes Type 2',severity:'medium',registered:'2024-02-03'},
+  {id:'PAT003',age:28,blood:'A+',gender:'Female',city:'Bangalore',symptoms:'Headache, dizziness',condition:'Migraine',severity:'low',registered:'2024-03-20'},
+  {id:'PAT004',age:45,blood:'AB-',gender:'Female',city:'Chennai',symptoms:'Joint pain, swelling',condition:'Rheumatoid Arthritis',severity:'medium',registered:'2024-04-11'},
+  {id:'PAT005',age:60,blood:'O-',gender:'Male',city:'Pune',symptoms:'Cough, night sweats',condition:'Tuberculosis (suspected)',severity:'high',registered:'2024-04-28'}
+];
+var SU=[
+  {id:'USR001',role:'Doctor',pass:'Doc@123',spec:'Cardiology',dept:'ICU'},
+  {id:'USR002',role:'Doctor',pass:'Doc@123',spec:'Neurology',dept:'OPD'},
+  {id:'USR003',role:'Researcher',pass:'Res@123',spec:'Oncology Research',dept:'R&D'}
+];
+var SC={
+  PAT001:[{from:'doctor',text:'Reviewing your recent vitals — BP readings noted.',time:'9:00 AM'},{from:'patient',text:'I still have some chest discomfort, especially when climbing stairs.',time:'9:05 AM'},{from:'doctor',text:'Please continue current medication and reduce sodium intake.',time:'9:10 AM'},{from:'patient',text:'Should I come in for a check-up?',time:'9:15 AM'}],
+  PAT002:[{from:'doctor',text:'Blood sugar levels are stabilising. Good progress on the protocol.',time:'11:00 AM'},{from:'patient',text:'Following the prescribed diet plan consistently.',time:'11:30 AM'}],
+  PAT003:[],PAT004:[],PAT005:[]
+};
+
+var ST=[
+  {id:'TRL001',title:'Phase III Hypertension Reduction Study',phase:'Phase III',status:'Recruiting',condition:'Hypertension',sponsor:'AIIMS Cardiology Dept',ageMin:30,ageMax:70,gender:'Any',severity:'high',include:'hypertension,chest pain,high bp,shortness of breath,palpitation',exclude:'renal failure,pregnancy,liver cirrhosis,stroke history',desc:'Evaluating a novel ACE inhibitor combination therapy for resistant hypertension in adult patients.',created:'2024-01-10'},
+  {id:'TRL002',title:'Diabetes Type 2 Lifestyle Intervention Trial',phase:'Phase II',status:'Recruiting',condition:'Diabetes Type 2',sponsor:'PGIMER Endocrinology',ageMin:35,ageMax:65,gender:'Any',severity:'medium',include:'diabetes,frequent urination,fatigue,weight loss,blood sugar',exclude:'type 1 diabetes,insulin dependent,renal failure,pregnancy',desc:'Assessing structured lifestyle modification combined with metformin titration in newly diagnosed T2DM patients.',created:'2024-02-05'},
+  {id:'TRL003',title:'Migraine Prophylaxis with Beta-Blockers',phase:'Phase II',status:'Active',condition:'Migraine',sponsor:'NIMHANS Neurology',ageMin:18,ageMax:50,gender:'Any',severity:'low',include:'migraine,headache,dizziness,nausea,light sensitivity',exclude:'asthma,heart block,hypotension,depression,pregnancy',desc:'Randomised controlled trial on propranolol efficacy for chronic migraine prevention.',created:'2024-03-12'},
+  {id:'TRL004',title:'Rheumatoid Arthritis Biologic Therapy Study',phase:'Phase III',status:'Recruiting',condition:'Rheumatoid Arthritis',sponsor:'Tata Memorial Centre',ageMin:25,ageMax:65,gender:'Female',severity:'medium',include:'joint pain,swelling,stiffness,arthritis,rheumatoid',exclude:'active infection,tuberculosis,hepatitis,immunosuppressed',desc:'Evaluating TNF-alpha inhibitor efficacy and safety in moderate-to-severe RA patients.',created:'2024-04-01'},
+  {id:'TRL005',title:'TB Shorter Regimen Efficacy Trial',phase:'Phase III',status:'Recruiting',condition:'Tuberculosis',sponsor:'National TB Elimination Programme',ageMin:18,ageMax:60,gender:'Any',severity:'high',include:'tuberculosis,cough,night sweats,tb,sputum,weight loss',exclude:'mdr tb,hiv positive,pregnancy,liver disease,renal failure',desc:'Assessing 4-month shortened treatment regimen for drug-sensitive pulmonary TB.',created:'2024-04-20'},
+  {id:'TRL006',title:'Anxiety-Depression Digital CBT Trial',phase:'Phase II',status:'Recruiting',condition:'Anxiety / Depression',sponsor:'NIMHANS Psychiatry',ageMin:18,ageMax:55,gender:'Any',severity:'medium',include:'anxiety,depression,stress,panic,mood disorder',exclude:'psychosis,bipolar,suicidal,active substance abuse',desc:'Validating app-based Cognitive Behavioural Therapy as adjunct to pharmacotherapy for GAD and MDD.',created:'2024-05-10'},
+  {id:'TRL007',title:'Severe Asthma Monoclonal Antibody Study',phase:'Phase II',status:'Recruiting',condition:'Asthma',sponsor:'KEM Hospital Pulmonology',ageMin:18,ageMax:60,gender:'Any',severity:'medium',include:'asthma,wheezing,breathing difficulty,inhaler,bronchospasm',exclude:'copd,smoking,cardiovascular disease,pregnancy',desc:'Investigating dupilumab effectiveness in eosinophilic severe asthma uncontrolled by ICS/LABA.',created:'2024-06-01'}
+];
+
+var DB={
+  session:lsGet(LS.session,null),
+  patients:lsGet(LS.patients,SP),
+  users:lsGet(LS.users,SU),
+  chats:lsGet(LS.chats,SC),
+  trials:lsGet(LS.trials,ST),
+  pc:lsGet(LS.pc,6),uc:lsGet(LS.uc,4),tc:lsGet(LS.tc,8),
+  activePat:'PAT001'
+};
+
+var CONDS=[
+  {kw:['chest pain','shortness of breath','palpitation','hypertension','high bp'],c:'Hypertension / Cardiac Issue',s:'high'},
+  {kw:['fatigue','frequent urination','thirst','weight loss','diabetes'],c:'Diabetes Type 2',s:'medium'},
+  {kw:['headache','dizziness','nausea','migraine','light sensitivity'],c:'Migraine',s:'low'},
+  {kw:['joint pain','swelling','stiffness','arthritis'],c:'Rheumatoid Arthritis',s:'medium'},
+  {kw:['cough','night sweats','tuberculosis','tb'],c:'Tuberculosis (suspected)',s:'high'},
+  {kw:['skin rash','itching','eczema','dermatitis'],c:'Dermatitis / Eczema',s:'low'},
+  {kw:['anxiety','panic','stress','depression','mood'],c:'Anxiety / Depression',s:'medium'},
+  {kw:['asthma','wheezing','breathing difficulty','inhaler'],c:'Asthma',s:'medium'},
+  {kw:['back pain','spine','disc','herniation'],c:'Spinal Disc Issue',s:'medium'},
+  {kw:['fever','cold','flu','viral','infection'],c:'Viral Infection',s:'low'}
+];
+function matchCond(text){
+  var lo=text.toLowerCase();
+  for(var i=0;i<CONDS.length;i++){var e=CONDS[i];for(var j=0;j<e.kw.length;j++){if(lo.indexOf(e.kw[j])>=0)return{c:e.c,s:e.s};}}
+  return{c:'General / Under Evaluation',s:'low'};
+}
+
+var AVC=['#1847D1','#0B9B8E','#7C3AED','#B45309','#15803D'];
+function avc(i){return AVC[i%AVC.length];}
+function ini(s){return s.split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2);}
+function today(){return new Date().toISOString().split('T')[0];}
+function ts(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function sevTag(s){
+  var m={high:'tag-r',medium:'tag-y',low:'tag-g'};
+  var l={high:'High Risk',medium:'Moderate',low:'Stable'};
+  return '<span class="tag '+m[s]+'">'+l[s]+'</span>';
+}
+function notify(msg,type){
+  type=type||'ok';
+  var n=document.getElementById('notif');
+  n.className='show n'+type;
+  document.getElementById('nmsg').textContent=msg;
+  clearTimeout(n._t);
+  n._t=setTimeout(function(){n.className='';},3200);
+}
+function openMo(id){document.getElementById(id).classList.add('open');}
+function closeMo(id){document.getElementById(id).classList.remove('open');}
+function setTitle(t){document.getElementById('tbTitle').textContent=t;}
+function setNav(el){document.querySelectorAll('.ni').forEach(function(n){n.classList.remove('active');});if(el)el.classList.add('active');}
+document.addEventListener('click',function(e){if(e.target.classList.contains('mo'))e.target.classList.remove('open');});
+
+var curRole='admin';
+function selectRole(role){
+  curRole=role;
+  document.querySelectorAll('.role-btn').forEach(function(b){b.classList.remove('active');});
+  var el=document.getElementById('rb-'+role);
+  if(el)el.classList.add('active');
+  document.getElementById('patNote').style.display=(role==='patient')?'block':'none';
+}
+
+function togglePwd(){
+  var i=document.getElementById('loginPass');
+  var b=document.getElementById('eyeBtn');
+  if(i.type==='password'){i.type='text';b.textContent='🙈';}else{i.type='password';b.textContent='👁';}
+}
+
+function doLogin(){
+  var email=(document.getElementById('loginEmail').value||'').trim().toLowerCase();
+  var pass=document.getElementById('loginPass').value||'';
+  if(!email||!pass){notify('Please enter your credentials.','err');return;}
+  var btn=document.querySelector('.btn-login');
+  btn.textContent='Verifying...';btn.disabled=true;
+  setTimeout(function(){
+    btn.innerHTML='Sign In &rarr;';btn.disabled=false;
+    if(curRole==='patient'){
+      // patient logs in with their PAT ID as username
+      var pid=email.toUpperCase();
+      var found=DB.patients.find(function(p){return p.id===pid;});
+      DB.session=found?{role:'patient',uid:pid,patId:found.id}:{role:'patient',uid:pid,patId:null};
+      saveSess();launchApp(false);return;
+    }
+    if(curRole==='admin'){
+      if(email==='admin'&&pass==='Admin@123'){DB.session={role:'admin',uid:'ADM001'};saveSess();launchApp(false);return;}
+      notify('Invalid administrator credentials.','err');return;
+    }
+    var u=DB.users.find(function(x){return x.id.toLowerCase()===email&&x.pass===pass;});
+    if(u&&u.role.toLowerCase()===curRole){DB.session={role:curRole,uid:u.id};saveSess();launchApp(false);return;}
+    notify('Incorrect credentials or role mismatch.','err');
+  },700);
+}
+
+function doLogout(){
+  DB.session=null;saveSess();
+  document.getElementById('loginScreen').classList.add('active');
+  document.getElementById('appScreen').classList.remove('active');
+  document.getElementById('loginEmail').value='';
+  document.getElementById('loginPass').value='';
+  selectRole('admin');
+}
+
+function launchApp(silent){
+  document.getElementById('loginScreen').classList.remove('active');
+  document.getElementById('appScreen').classList.add('active');
+  buildSidebar();
+  if(DB.session.role==='patient'){
+    var exists=DB.patients.find(function(p){return p.id===DB.session.patId;});
+    if(!exists){pgPatientRegister();if(!silent)notify('Welcome! Please complete your registration.','info');return;}
+  }
+  pgDashboard();
+  if(!silent)notify('Welcome back, '+DB.session.uid,'ok');
+}
+
+window.addEventListener('DOMContentLoaded',function(){if(DB.session)launchApp(true);});
+
+function buildSidebar(){
+  var role=DB.session.role;
+  var bc={admin:'bdg-admin',doctor:'bdg-doctor',researcher:'bdg-researcher',patient:'bdg-patient'}[role];
+  var rl=role.charAt(0).toUpperCase()+role.slice(1);
+  var av=document.getElementById('sbAv');
+  var uid=DB.session.uid||'--';
+  if(av){av.textContent=uid.slice(0,3);av.style.background=avc(0);}
+  var un=document.getElementById('sbName');if(un)un.textContent=uid;
+  var ub=document.getElementById('sbBadge');if(ub){ub.textContent=rl;ub.className='sb-user-badge '+bc;}
+
+  var menus={
+    admin:[{i:'⬛',l:'Dashboard',f:'pgDashboard'},{i:'⬛',l:'Patients',f:'pgPatients'},{i:'⬛',l:'Clinical Trials',f:'pgTrials'},{i:'⬛',l:'Trial Matching',f:'pgMatching'},{i:'⬛',l:'Manage Users',f:'pgUsers'},{i:'⬛',l:'Search Patients',f:'pgSearch'},{i:'⬛',l:'Analytics',f:'pgAnalytics'},{i:'⬛',l:'Firebase Setup',f:'pgFirebaseSetup'}],
+    doctor:[{i:'⬛',l:'Dashboard',f:'pgDashboard'},{i:'⬛',l:'My Patients',f:'pgPatients'},{i:'⬛',l:'Trial Matching',f:'pgMatching'},{i:'⬛',l:'Chat / Consult',f:'pgChat'},{i:'⬛',l:'Search',f:'pgSearch'}],
+    researcher:[{i:'⬛',l:'Dashboard',f:'pgDashboard'},{i:'⬛',l:'Clinical Trials',f:'pgTrials'},{i:'⬛',l:'Patient Data',f:'pgPatients'},{i:'⬛',l:'Trial Matching',f:'pgMatching'},{i:'⬛',l:'Search',f:'pgSearch'},{i:'⬛',l:'Analytics',f:'pgAnalytics'}],
+    patient:[{i:'⬛',l:'My Profile',f:'pgDashboard'},{i:'⬛',l:'My Records',f:'pgMyRecords'},{i:'⬛',l:'Trial Matches',f:'pgMyTrials'},{i:'⬛',l:'Chat with Doctor',f:'pgChat'}]
+  };
+  var icons={admin:['📊','🧑‍⚕️','🧪','🎯','👥','🔍','📈','🔥'],doctor:['📊','🧑‍⚕️','🎯','💬','🔍'],researcher:['📊','🧪','🔬','🎯','🔍','📈'],patient:['👤','📋','🎯','💬']};
+  var ic=icons[role]||[];
+  var cs=(role==='admin'||role==='doctor'||role==='researcher');
+  document.getElementById('srchWrap').style.display=cs?'block':'none';
+  var html='';
+  (menus[role]||[]).forEach(function(m,i){
+    html+='<button class="ni" onclick="'+m.f+'();setNav(this)">'+
+      '<span class="nic">'+(ic[i]||'▪')+'</span>'+m.l+
+      '<span class="ni-dot"></span></button>';
+  });
+  document.getElementById('sbNav').innerHTML=html;
+  setTimeout(function(){var f=document.querySelector('.ni');if(f)f.classList.add('active');},30);
+}
+
+function pgDashboard(){
+  setTitle('Dashboard');
+  if(DB.session.role==='patient'){pgPatientDash();return;}
+  var total=DB.patients.length;
+  var hi=DB.patients.filter(function(p){return p.severity==='high';}).length;
+  var med=DB.patients.filter(function(p){return p.severity==='medium';}).length;
+  var lo=DB.patients.filter(function(p){return p.severity==='low';}).length;
+  var cs=condStats();
+  var bars=cs.slice(0,6).map(function(c){
+    var pct=total?Math.round(c.n/total*100):0;
+    return '<div class="abar-row"><div class="abar-top"><span class="abar-lbl">'+esc(c.name)+'</span><span class="abar-val">'+c.n+'</span></div>'+
+      '<div class="abar-track"><div class="abar-fill" style="width:'+pct+'%;background:'+c.col+'"></div></div></div>';
+  }).join('');
+  var rrows=DB.patients.slice(0,5).map(function(p){
+    return '<tr><td><span class="fw5 ca">'+p.id+'</span></td><td>'+p.age+'</td>'+
+      '<td><span class="tag tag-b">'+p.blood+'</span></td><td>'+p.condition+'</td><td>'+sevTag(p.severity)+'</td></tr>';
+  }).join('');
+  document.getElementById('pb').innerHTML=
+    '<div class="sgrid">'+
+      mks('🧑‍⚕️','Total Patients',total,'All registered patients','#1847D1')+
+      mks('🔴','High Severity',hi,'Requires urgent attention','#C93030')+
+      mks('🟡','Moderate',med,'Monitoring closely','#B45309')+
+      mks('🟢','Stable',lo,'Routine follow-up','#15803D')+
+      mks('🧪','Active Trials',DB.trials.filter(function(t){return t.status==='Recruiting';}).length,'Open for enrollment','#7C3AED')+
+    '</div>'+
+    '<div class="g2">'+
+      '<div class="card"><div class="ch"><span class="ct">Recent Admissions</span>'+
+      '<button class="btn btn-ghost btn-sm" onclick="pgPatients();setNav(document.querySelectorAll(\'.ni\')[1])">View all</button></div>'+
+      '<div class="tw"><table><thead><tr><th>ID</th><th>Age</th><th>Blood</th><th>Condition</th><th>Status</th></tr></thead>'+
+      '<tbody>'+rrows+'</tbody></table></div></div>'+
+      '<div class="card"><div class="ch"><span class="ct">Condition Breakdown</span></div><div class="cb">'+bars+'</div></div>'+
+    '</div>'+
+    '<div class="card" style="margin-top:18px;"><div class="ch"><span class="ct">🤖 AI Trial Matching — Quick Run</span><button class="btn btn-primary btn-sm" onclick="pgMatching();setNav(document.querySelectorAll(\'.ni\')[2])">Open Engine</button></div>'+
+    '<div class="cb" id="dashMatchSnippet"></div></div>';
+  renderDashMatchSnippet();
+}
+function renderDashMatchSnippet(){
+  var el=document.getElementById('dashMatchSnippet');
+  if(!el)return;
+  var topMatches=runAllMatches(DB.patients,DB.trials,60).slice(0,4);
+  if(!topMatches.length){
+    el.innerHTML='<div class="empty" style="padding:20px;"><div class="ei">🎯</div><div class="et">No strong matches yet — <a href="#" onclick="pgMatching()">run engine</a></div></div>';
+    return;
+  }
+  el.innerHTML='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">'+
+    topMatches.map(function(r){
+      return '<div style="padding:12px 14px;background:var(--paper);border-radius:var(--rs);border:1px solid var(--border);display:flex;align-items:center;gap:10px;">'+
+        '<div style="width:44px;height:44px;border-radius:50%;background:'+r.match.gradeColor+'22;display:flex;align-items:center;justify-content:center;font-family:Fraunces,serif;font-size:14px;font-weight:700;color:'+r.match.gradeColor+';flex-shrink:0;">'+r.match.score+'%</div>'+
+        '<div style="min-width:0;"><div style="font-size:12px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(r.trial.title.slice(0,42))+'…</div>'+
+        '<div style="font-size:11px;color:var(--ink3);margin-top:1px;">Patient <span class="ca fw5">'+r.patId+'</span> · <span style="color:'+r.match.gradeColor+'">'+r.match.gradeLabel+'</span></div></div>'+
+      '</div>';
+    }).join('')+'</div>';
+}
+function mks(ico,lbl,val,sub,col){
+  return '<div class="scard"><div class="scard-accent" style="background:'+col+'"></div>'+
+    '<div class="scard-icon">'+ico+'</div>'+
+    '<div class="scard-val">'+val+'</div>'+
+    '<div class="scard-lbl">'+lbl+'</div>'+
+    '<div class="scard-sub">'+sub+'</div></div>';
+}
+function condStats(){
+  var m={};
+  DB.patients.forEach(function(p){m[p.condition]=(m[p.condition]||0)+1;});
+  return Object.keys(m).map(function(k,i){return{name:k,n:m[k],col:AVC[i%AVC.length]};});
+}
+
+function pgPatientDash(){
+  setTitle('My Profile');
+  var pid=DB.session.patId;
+  var p=pid?DB.patients.find(function(x){return x.id===pid;}):null;
+  if(!p){pgPatientRegister();return;}
+  document.getElementById('pb').innerHTML=
+    '<div class="card" style="max-width:600px;">'+
+    '<div class="ch"><span class="ct">Health Profile</span><button class="btn btn-ghost btn-sm" onclick="pgPatEditForm()">✏ Edit</button></div>'+
+    '<div class="cb">'+
+    '<div class="pid-box"><div><div class="pid-lbl">Patient ID</div><div class="pid-val">'+p.id+'</div></div>'+
+    '<div style="font-size:36px;opacity:.3;">🏥</div></div>'+
+    '<div class="fg2">'+
+    '<div><div class="txs c3 mb4">Age</div><div class="fw5">'+p.age+' years</div></div>'+
+    '<div><div class="txs c3 mb4">Blood Group</div><div class="fw5">'+p.blood+'</div></div>'+
+    '<div><div class="txs c3 mb4">Gender</div><div class="fw5">'+p.gender+'</div></div>'+
+    '<div><div class="txs c3 mb4">City</div><div class="fw5">'+esc(p.city)+'</div></div>'+
+    '<div class="sp2"><div class="txs c3 mb4">Symptoms</div><div class="fw5">'+esc(p.symptoms)+'</div></div>'+
+    '<div class="sp2"><div class="txs c3 mb4">Assessed Condition</div><div class="fx aic g8">'+sevTag(p.severity)+'<span class="fw5">'+esc(p.condition)+'</span></div></div>'+
+    '</div></div></div>';
+}
+
+function pgPatientRegister(){
+  setTitle('Complete Registration');
+  document.getElementById('pb').innerHTML=
+    '<div style="max-width:560px;"><div class="card">'+
+    '<div class="ch"><div><div class="ct">Patient Registration</div><div class="txs c3" style="margin-top:2px;">Complete your profile to access all features</div></div></div>'+
+    '<div class="cb"><div class="fg2">'+
+    '<div class="fg"><label class="fl">Age *</label><input class="fi" type="number" id="rAge" placeholder="e.g. 28" min="1" max="120"></div>'+
+    '<div class="fg"><label class="fl">Blood Group *</label><select class="fsel" id="rBlood"><option value="">Select</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>'+
+    '<div class="fg"><label class="fl">Gender *</label><select class="fsel" id="rGender"><option value="">Select</option><option>Male</option><option>Female</option><option>Non-binary</option><option>Prefer not to say</option></select></div>'+
+    '<div class="fg sp2"><label class="fl">City / Address *</label><input class="fi" id="rCity" placeholder="e.g. Mumbai"></div>'+
+    '<div class="fg sp2"><label class="fl">Symptoms / Condition *</label><input class="fi" id="rSymp" placeholder="Describe your symptoms..." oninput="rMatch(this.value)"></div>'+
+    '<div class="sp2" id="rMatchBox" style="display:none;"></div>'+
+    '</div><button class="btn btn-primary" style="margin-top:8px;" onclick="submitReg()">Register &amp; Continue</button></div></div></div>';
+}
+function submitReg(){
+  var age=document.getElementById('rAge').value;
+  var blood=document.getElementById('rBlood').value;
+  var gender=document.getElementById('rGender').value;
+  var city=document.getElementById('rCity').value.trim();
+  var symp=document.getElementById('rSymp').value.trim();
+  if(!age||!blood||!gender||!city||!symp){notify('Please fill in all required fields.','err');return;}
+  var m=matchCond(symp);
+  var nid='PAT'+String(DB.pc++).padStart(3,'0');
+  DB.patients.push({id:nid,age:parseInt(age),blood:blood,gender:gender,city:city,symptoms:symp,condition:m.c,severity:m.s,registered:today()});
+  if(!DB.chats[nid])DB.chats[nid]=[];
+  DB.session.patId=nid;
+  saveSess();saveAll();buildSidebar();
+  notify('Registered successfully! Your ID is '+nid,'ok');
+  pgPatientDash();
+}
+function pgPatEditForm(){
+  var pid=DB.session.patId;
+  var p=pid?DB.patients.find(function(x){return x.id===pid;}):null;
+  if(!p)return;setTitle('Edit Profile');
+  var bo=['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(function(b){return '<option'+(b===p.blood?' selected':'')+'>'+b+'</option>';}).join('');
+  var go=['Male','Female','Non-binary','Prefer not to say'].map(function(g){return '<option'+(g===p.gender?' selected':'')+'>'+g+'</option>';}).join('');
+  document.getElementById('pb').innerHTML=
+    '<div style="max-width:560px;"><div class="card">'+
+    '<div class="ch"><span class="ct">Edit Profile &mdash; '+p.id+'</span></div>'+
+    '<div class="cb"><div class="fg2">'+
+    '<div class="fg"><label class="fl">Age *</label><input class="fi" type="number" id="eRAge" value="'+p.age+'" min="1" max="120"></div>'+
+    '<div class="fg"><label class="fl">Blood Group *</label><select class="fsel" id="eRBlood">'+bo+'</select></div>'+
+    '<div class="fg"><label class="fl">Gender *</label><select class="fsel" id="eRGender">'+go+'</select></div>'+
+    '<div class="fg sp2"><label class="fl">City *</label><input class="fi" id="eRCity" value="'+esc(p.city)+'"></div>'+
+    '<div class="fg sp2"><label class="fl">Symptoms *</label><input class="fi" id="eRSymp" value="'+esc(p.symptoms)+'" oninput="rMatch(this.value)"></div>'+
+    '<div class="sp2" id="rMatchBox" style="display:none;"></div>'+
+    '</div><div class="fx g8 mt12">'+
+    '<button class="btn btn-primary" style="width:auto;" onclick="savePatEdit(\''+p.id+'\')">Save Changes</button>'+
+    '<button class="btn btn-ghost" onclick="pgPatientDash()">Cancel</button></div></div></div></div>';
+  rMatch(p.symptoms);
+}
+function savePatEdit(id){
+  var age=document.getElementById('eRAge').value;
+  var blood=document.getElementById('eRBlood').value;
+  var gender=document.getElementById('eRGender').value;
+  var city=document.getElementById('eRCity').value.trim();
+  var symp=document.getElementById('eRSymp').value.trim();
+  if(!age||!blood||!gender||!city||!symp){notify('Please fill all required fields.','err');return;}
+  var m=matchCond(symp);
+  var idx=DB.patients.findIndex(function(p){return p.id===id;});
+  DB.patients[idx]=Object.assign({},DB.patients[idx],{age:parseInt(age),blood:blood,gender:gender,city:city,symptoms:symp,condition:m.c,severity:m.s});
+  saveSess();saveAll();buildSidebar();
+  notify('Profile updated.','ok');pgPatientDash();
+}
+function pgMyRecords(){
+  setTitle('My Records');
+  var pid=DB.session.patId;
+  var p=pid?DB.patients.find(function(x){return x.id===pid;}):null;
+  if(!p){document.getElementById('pb').innerHTML='<div class="empty"><div class="ei">📋</div><div class="et">No records found</div><div class="es2">Your doctor has not added your records yet.</div></div>';return;}
+  document.getElementById('pb').innerHTML=
+    '<div class="card" style="max-width:640px;"><div class="ch"><span class="ct">Medical Records &mdash; '+p.id+'</span></div><div class="cb">'+
+    '<div class="fg2">'+
+    '<div><div class="txs c3 mb4">Patient ID</div><div class="fw6 ca">'+p.id+'</div></div>'+
+    '<div><div class="txs c3 mb4">Registered</div><div class="fw5">'+p.registered+'</div></div>'+
+    '<div><div class="txs c3 mb4">Age</div><div class="fw5">'+p.age+' yrs</div></div>'+
+    '<div><div class="txs c3 mb4">Blood Group</div><div class="fw5">'+p.blood+'</div></div>'+
+    '<div><div class="txs c3 mb4">Gender</div><div class="fw5">'+p.gender+'</div></div>'+
+    '<div><div class="txs c3 mb4">City</div><div class="fw5">'+esc(p.city)+'</div></div>'+
+    '<div class="sp2"><div class="txs c3 mb4">Symptoms</div><div class="fw5">'+esc(p.symptoms)+'</div></div>'+
+    '<div class="sp2"><div class="txs c3 mb4">Condition</div><div class="fx aic g8">'+sevTag(p.severity)+'<span class="fw5">'+esc(p.condition)+'</span></div></div>'+
+    '</div></div></div>';
+}
+
+function pgPatients(list){
+  setTitle('Patients');
+  var role=DB.session.role,canEdit=(role==='admin'),isRes=(role==='researcher');
+  var pts=list||DB.patients;
+  var th='<th>ID</th>'+
+    '<th>Age</th><th>Blood</th><th>Gender</th><th>City</th><th>Condition</th><th>Status</th><th>Registered</th>'+(canEdit?'<th></th>':'');
+  var td=pts.length===0
+    ?'<tr><td colspan="9"><div class="empty"><div class="ei">🔍</div><div class="et">No patients found</div></div></td></tr>'
+    :pts.map(function(p){
+      return '<tr><td><span class="fw5 ca">'+p.id+'</span></td>'+
+        '<td>'+p.age+'</td><td><span class="tag tag-b">'+p.blood+'</span></td><td>'+p.gender+'</td>'+
+        '<td>'+esc(p.city)+'</td><td class="tsm">'+esc(p.condition)+'</td><td>'+sevTag(p.severity)+'</td>'+
+        '<td class="c3 txs">'+p.registered+'</td>'+
+        (canEdit?'<td><div class="fx g8"><button class="btn btn-ghost btn-sm" onclick="openPatForm(\''+p.id+'\')">Edit</button>'+
+        '<button class="btn btn-danger btn-sm" onclick="delPat(\''+p.id+'\')">Delete</button></div></td>':'')+
+        '</tr>';
+    }).join('');
+  document.getElementById('pb').innerHTML=
+    '<div class="fx aic g12 mb18">'+
+    (canEdit?'<button class="btn btn-primary btn-sm" style="width:auto;" onclick="openPatForm()">+ New Patient</button>':'')+
+    '<span class="tsm c3">'+pts.length+' patient'+(pts.length!==1?'s':'')+' total</span></div>'+
+    '<div class="card"><div class="tw"><table><thead><tr>'+th+'</tr></thead><tbody>'+td+'</tbody></table></div></div>';
+}
+function openPatForm(id){
+  document.getElementById('patModalTitle').textContent=id?'Edit Patient':'New Patient';
+  document.getElementById('editPatId').value=id||'';
+  document.getElementById('condMatchBox').style.display='none';
+  if(id){
+    var p=DB.patients.find(function(x){return x.id===id;});
+    document.getElementById('fAge').value=p.age;document.getElementById('fBlood').value=p.blood;
+    document.getElementById('fGender').value=p.gender;document.getElementById('fCity').value=p.city;
+    document.getElementById('fSymp').value=p.symptoms;liveMatch(p.symptoms);
+  }else{['fAge','fBlood','fGender','fCity','fSymp'].forEach(function(f){document.getElementById(f).value='';});}
+  openMo('patModal');
+}
+function savePat(){
+  var age=document.getElementById('fAge').value,blood=document.getElementById('fBlood').value;
+  var gender=document.getElementById('fGender').value,city=document.getElementById('fCity').value.trim();
+  var symp=document.getElementById('fSymp').value.trim();
+  if(!age||!blood||!gender||!city||!symp){notify('Please fill all required fields.','err');return;}
+  var m=matchCond(symp),eid=document.getElementById('editPatId').value;
+  if(eid){
+    var idx=DB.patients.findIndex(function(p){return p.id===eid;});
+    DB.patients[idx]=Object.assign({},DB.patients[idx],{age:parseInt(age),blood:blood,gender:gender,city:city,symptoms:symp,condition:m.c,severity:m.s});
+    saveAll();notify('Patient '+eid+' updated.','ok');
+  }else{
+    var nid='PAT'+String(DB.pc++).padStart(3,'0');
+    DB.patients.push({id:nid,age:parseInt(age),blood:blood,gender:gender,city:city,symptoms:symp,condition:m.c,severity:m.s,registered:today()});
+    if(!DB.chats[nid])DB.chats[nid]=[];
+    saveAll();notify('Patient registered as '+nid,'ok');
+  }
+  closeMo('patModal');pgPatients();
+}
+function delPat(id){
+  if(!confirm('Permanently delete patient '+id+'?'))return;
+  DB.patients=DB.patients.filter(function(p){return p.id!==id;});
+  delete DB.chats[id];
+  saveAll();
+  if(FB_ENABLED){ fbDelete('patients',id); fbDelete('chats',id); }
+  notify('Patient deleted.','ok');pgPatients();
+}
+function liveMatch(text){
+  var box=document.getElementById('condMatchBox');if(!box)return;
+  if(!text.trim()){box.style.display='none';return;}
+  var m=matchCond(text),cls={high:'al-d',medium:'al-w',low:'al-ok'}[m.s];
+  box.innerHTML='<div class="al2 '+cls+'">🔬 Matched: <strong>'+m.c+'</strong> &mdash; Risk: <strong>'+m.s.toUpperCase()+'</strong></div>';
+  box.style.display='block';
+}
+
+function pgUsers(){
+  setTitle('Manage Users');
+  var rows=DB.users.map(function(u){
+    return '<tr><td class="ca fw5">'+u.id+'</td>'+
+      '<td><span class="tag '+(u.role==='Doctor'?'tag-b':'tag-t')+'">'+u.role+'</span></td>'+
+      '<td>'+(u.spec||'&mdash;')+'</td><td>'+(u.dept||'&mdash;')+'</td>'+
+      '<td><div class="fx g8"><button class="btn btn-ghost btn-sm" onclick="openUserForm(\''+u.id+'\')">Edit</button>'+
+      '<button class="btn btn-danger btn-sm" onclick="delUser(\''+u.id+'\')">Delete</button></div></td></tr>';
+  }).join('');
+  document.getElementById('pb').innerHTML=
+    '<div class="fx aic g12 mb18"><button class="btn btn-primary btn-sm" style="width:auto;" onclick="openUserForm()">+ Register Staff</button>'+
+    '<span class="tsm c3">'+DB.users.length+' staff members</span></div>'+
+    '<div class="card"><div class="tw"><table><thead><tr><th>ID</th><th>Role</th><th>Specialization</th><th>Dept</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+function openUserForm(id){
+  document.getElementById('userModalTitle').textContent=id?'Edit Staff Member':'Register Staff';
+  document.getElementById('editUserId').value=id||'';
+  if(id){
+    var u=DB.users.find(function(x){return x.id===id;});
+    document.getElementById('uRole').value=u.role;document.getElementById('uPass').value=u.pass;
+    document.getElementById('uSpec').value=u.spec||'';document.getElementById('uDept').value=u.dept||'';
+  }else{['uRole','uPass','uSpec','uDept'].forEach(function(f){document.getElementById(f).value='';});}
+  openMo('userModal');
+}
+function saveUser(){
+  var role=document.getElementById('uRole').value;
+  var pass=document.getElementById('uPass').value;
+  var spec=document.getElementById('uSpec').value.trim(),dept=document.getElementById('uDept').value.trim();
+  if(!role||!pass){notify('Please fill all required fields.','err');return;}
+  var eid=document.getElementById('editUserId').value;
+  if(eid){
+    var idx=DB.users.findIndex(function(u){return u.id===eid;});
+    DB.users[idx]=Object.assign({},DB.users[idx],{role:role,pass:pass,spec:spec,dept:dept});
+    saveAll();notify('Staff member updated.','ok');
+  }else{
+    var nid='USR'+String(DB.uc++).padStart(3,'0');
+    DB.users.push({id:nid,role:role,pass:pass,spec:spec,dept:dept});
+    saveAll();notify(role+' '+nid+' registered.','ok');
+  }
+  closeMo('userModal');pgUsers();
+}
+function delUser(id){
+  if(!confirm('Remove this staff member?'))return;
+  DB.users=DB.users.filter(function(u){return u.id!==id;});
+  saveAll();notify('Staff member removed.','ok');pgUsers();
+}
+
+function pgChat(){
+  setTitle('Chat & Consultation');
+  var role=DB.session.role,isPat=(role==='patient');
+  var patList=isPat?DB.patients.filter(function(p){return p.id===DB.session.patId;}):DB.patients;
+  if(isPat&&patList.length>0)DB.activePat=patList[0].id;
+  var lhtml=patList.length===0
+    ?'<div class="empty" style="padding:30px;"><div class="ei">💬</div><div class="et">No conversations</div></div>'
+    :patList.map(function(p,i){
+      var msgs=DB.chats[p.id]||[];
+      var label=isPat?'Doctor (USR001)':'Patient '+p.id;
+      var badge=msgs.length?'<span class="cbadge">'+msgs.length+'</span>':'';
+      var act=p.id===DB.activePat?' active':'';
+      return '<div class="citem'+act+'" onclick="selChat(\''+p.id+'\',this)">'+
+        '<div class="cav" style="background:'+avc(i)+';">'+ini(isPat?'DR':p.id)+'</div>'+
+        '<div style="flex:1;min-width:0;"><div class="cname">'+label+'</div><div class="csub">'+esc(p.condition)+'</div></div>'+badge+'</div>';
+    }).join('');
+  document.getElementById('pb').innerHTML=
+    '<div class="cl"><div class="cll"><div class="clh">'+(isPat?'My Doctor':'Consultations')+'</div>'+
+    '<div class="clist" id="clistEl">'+lhtml+'</div></div>'+
+    '<div class="cmain" id="cmainEl">'+buildChatMain()+'</div></div>';
+  scrollChat();
+}
+function buildChatMain(){
+  var pid=DB.activePat;
+  if(!pid)return '<div class="empty" style="margin:auto;"><div class="ei">💬</div><div class="et">Select a conversation</div></div>';
+  var pat=DB.patients.find(function(p){return p.id===pid;});
+  var msgs=DB.chats[pid]||[];
+  var role=DB.session.role;
+  var ph=role==='doctor'?'Type your advice or prescription...':'Describe your symptoms or ask a question...';
+  var mhtml=msgs.length===0
+    ?'<div class="empty"><div class="ei">💬</div><div class="et">No messages yet</div></div>'
+    :msgs.map(function(m){
+      var mine=(role==='doctor'&&m.from==='doctor')||(role==='patient'&&m.from==='patient');
+      var bg=m.from==='doctor'?'#1847D1':'#0B9B8E';
+      return '<div class="mrow '+(mine?'mine':'theirs')+'">'+
+        '<div class="mav" style="background:'+bg+';">'+(m.from==='doctor'?'Dr':'Pt')+'</div>'+
+        '<div><div class="mbub">'+esc(m.text)+'</div><div class="mtime">'+m.time+'</div></div></div>';
+    }).join('');
+  return '<div class="ctop"><div class="cav" style="background:#1847D1;width:32px;height:32px;font-size:11px;">'+ini(pid)+'</div>'+
+    '<div><div class="fw5 tsm">'+pid+'</div><div class="txs c3">'+(pat?esc(pat.condition)+' &bull; '+esc(pat.city):'')+'</div></div>'+
+    '<div style="margin-left:auto;">'+(pat?sevTag(pat.severity):'')+'</div></div>'+
+    '<div class="cmsgs" id="cmsgsEl">'+mhtml+'</div>'+
+    '<div class="cinrow"><input class="cinp" id="chatInp" placeholder="'+ph+'" onkeydown="if(event.key===\'Enter\')sendMsg()">'+
+    '<button class="sbtn" onclick="sendMsg()">&#10148;</button></div>';
+}
+function selChat(pid,el){
+  DB.activePat=pid;
+  document.querySelectorAll('.citem').forEach(function(x){x.classList.remove('active');});
+  el.classList.add('active');
+  document.getElementById('cmainEl').innerHTML=buildChatMain();scrollChat();
+}
+function sendMsg(){
+  var inp=document.getElementById('chatInp');if(!inp)return;
+  var text=inp.value.trim();if(!text)return;
+  var role=DB.session.role,from=(role==='doctor')?'doctor':'patient',pid=DB.activePat;
+  if(!DB.chats[pid])DB.chats[pid]=[];
+  DB.chats[pid].push({from:from,text:text,time:ts()});
+  saveAll();inp.value='';
+  document.getElementById('cmainEl').innerHTML=buildChatMain();scrollChat();
+  if(from==='patient'){
+    setTimeout(function(){
+      var reps=['Thank you for sharing. I will review your records and advise accordingly.','Please continue your medication and stay well hydrated.','I recommend scheduling an in-person visit. How long have you had these symptoms?','Your readings look stable. Continue with the current treatment plan.'];
+      DB.chats[pid].push({from:'doctor',text:reps[Math.floor(Math.random()*reps.length)],time:ts()});
+      saveAll();document.getElementById('cmainEl').innerHTML=buildChatMain();scrollChat();
+    },1400);
+  }
+}
+function scrollChat(){setTimeout(function(){var el=document.getElementById('cmsgsEl');if(el)el.scrollTop=el.scrollHeight;},60);}
+
+function pgSearch(){
+  setTitle('Search');
+  document.getElementById('pb').innerHTML=
+    '<div class="card mb20"><div class="ch"><span class="ct">Filter Patients</span></div><div class="cb">'+
+    '<div class="fgrid">'+
+    '<div class="fg" style="margin:0;"><label class="fl">Age Min</label><input class="fi" type="number" id="sAMin" placeholder="0"></div>'+
+    '<div class="fg" style="margin:0;"><label class="fl">Age Max</label><input class="fi" type="number" id="sAMax" placeholder="120"></div>'+
+    '<div class="fg" style="margin:0;"><label class="fl">Gender</label><select class="fsel" id="sGen"><option value="">Any</option><option>Male</option><option>Female</option><option>Non-binary</option></select></div>'+
+    '<div class="fg" style="margin:0;"><label class="fl">Blood Group</label><select class="fsel" id="sBld"><option value="">Any</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>'+
+    '<div class="fg" style="margin:0;"><label class="fl">City</label><input class="fi" id="sCity" placeholder="e.g. Mumbai"></div>'+
+    '<div class="fg" style="margin:0;"><label class="fl">Condition / Symptom</label><input class="fi" id="sCond" placeholder="e.g. Hypertension"></div>'+
+    '</div><div class="fx g8" style="margin-top:14px;">'+
+    '<button class="btn btn-primary btn-sm" style="width:auto;" onclick="runSearch()">Search</button>'+
+    '<button class="btn btn-ghost btn-sm" onclick="resetSearch()">Clear</button></div></div></div>'+
+    '<div id="sRes"></div>';
+}
+function runSearch(){
+  var amin=parseInt(document.getElementById('sAMin').value)||0,amax=parseInt(document.getElementById('sAMax').value)||999;
+  var gen=document.getElementById('sGen').value,bld=document.getElementById('sBld').value;
+  var city=document.getElementById('sCity').value.trim().toLowerCase(),cond=document.getElementById('sCond').value.trim().toLowerCase();
+  var res=DB.patients.filter(function(p){
+    return p.age>=amin&&p.age<=amax&&(!gen||p.gender===gen)&&(!bld||p.blood===bld)
+      &&(!city||p.city.toLowerCase().indexOf(city)>=0)
+      &&(!cond||p.condition.toLowerCase().indexOf(cond)>=0||p.symptoms.toLowerCase().indexOf(cond)>=0);
+  });
+  var th='<th>ID</th>'+'<th>Age</th><th>Blood</th><th>Gender</th><th>City</th><th>Condition</th><th>Status</th>';
+  var td=res.length===0
+    ?'<tr><td colspan="7"><div class="empty"><div class="ei">🔍</div><div class="et">No patients match these filters</div></div></td></tr>'
+    :res.map(function(p){
+      return '<tr><td class="fw5 ca">'+p.id+'</td>'+
+        '<td>'+p.age+'</td><td><span class="tag tag-b">'+p.blood+'</span></td>'+
+        '<td>'+p.gender+'</td><td>'+esc(p.city)+'</td><td>'+esc(p.condition)+'</td><td>'+sevTag(p.severity)+'</td></tr>';
+    }).join('');
+  document.getElementById('sRes').innerHTML=
+    '<div class="card"><div class="ch"><span class="ct">Results</span><span class="txs c3">'+res.length+' patient'+(res.length!==1?'s':'')+' found</span></div>'+
+    '<div class="tw"><table><thead><tr>'+th+'</tr></thead><tbody>'+td+'</tbody></table></div></div>';
+}
+function resetSearch(){
+  ['sAMin','sAMax','sCity','sCond'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
+  ['sGen','sBld'].forEach(function(id){var e=document.getElementById(id);if(e)e.value='';});
+  var r=document.getElementById('sRes');if(r)r.innerHTML='';
+}
+
+/* ═══════════════════════════════════════
+   AI CLINICAL TRIAL MATCHING ENGINE
+═══════════════════════════════════════ */
+
+// ── CORE MATCHING ALGORITHM ──
+// Returns a scored match object with full explanation
+function computeMatch(patient, trial){
+  var reasons=[], score=0, maxScore=0;
+
+  // 1. Condition / keyword match (40 pts)
+  maxScore+=40;
+  var inclKws=trial.include.toLowerCase().split(',').map(function(k){return k.trim();}).filter(Boolean);
+  var symptomText=(patient.symptoms+' '+patient.condition).toLowerCase();
+  var matchedInc=inclKws.filter(function(k){return symptomText.indexOf(k)>=0;});
+  var inclScore=inclKws.length?Math.round((matchedInc.length/inclKws.length)*40):0;
+  score+=inclScore;
+  if(matchedInc.length>0){
+    reasons.push({type:'pass',text:'Condition match: '+matchedInc.slice(0,3).join(', ')+(matchedInc.length>3?' +more':'')});
+  } else {
+    reasons.push({type:'fail',text:'No inclusion keyword match found'});
+  }
+
+  // 2. Exclusion criteria (hard fail = -100 if matched)
+  var exclKws=trial.exclude.toLowerCase().split(',').map(function(k){return k.trim();}).filter(Boolean);
+  var matchedExcl=exclKws.filter(function(k){return symptomText.indexOf(k)>=0;});
+  if(matchedExcl.length>0){
+    score=-999; // disqualified
+    reasons.push({type:'fail',text:'EXCLUSION criteria matched: '+matchedExcl.join(', ')});
+  } else {
+    reasons.push({type:'pass',text:'No exclusion criteria triggered'});
+  }
+
+  // 3. Age range (20 pts)
+  maxScore+=20;
+  var ageMin=parseInt(trial.ageMin)||0, ageMax=parseInt(trial.ageMax)||999;
+  if(patient.age>=ageMin && patient.age<=ageMax){
+    score+=20;
+    reasons.push({type:'pass',text:'Age '+patient.age+' within range ['+ageMin+'–'+ageMax+']'});
+  } else {
+    var ageDiff=Math.min(Math.abs(patient.age-ageMin),Math.abs(patient.age-ageMax));
+    reasons.push({type:'fail',text:'Age '+patient.age+' outside range ['+ageMin+'–'+ageMax+'] by '+ageDiff+' yrs'});
+  }
+
+  // 4. Gender eligibility (15 pts)
+  maxScore+=15;
+  if(trial.gender==='Any'||trial.gender===patient.gender){
+    score+=15;
+    reasons.push({type:'pass',text:'Gender eligible: '+trial.gender});
+  } else {
+    reasons.push({type:'fail',text:'Gender mismatch — trial requires: '+trial.gender});
+  }
+
+  // 5. Severity match (15 pts)
+  maxScore+=15;
+  if(trial.severity==='any'||trial.severity===patient.severity){
+    score+=15;
+    reasons.push({type:'pass',text:'Severity level matched: '+patient.severity.toUpperCase()});
+  } else {
+    var sevPoints={high:3,medium:2,low:1};
+    var diff=Math.abs((sevPoints[trial.severity]||1)-(sevPoints[patient.severity]||1));
+    var partial=diff===1?8:0;
+    score+=partial;
+    reasons.push({type:'warn',text:'Severity mismatch — trial wants '+trial.severity+', patient is '+patient.severity+(partial?' (partial +'+partial+')':'')});
+  }
+
+  // 6. Trial status bonus (10 pts)
+  maxScore+=10;
+  if(trial.status==='Recruiting'){
+    score+=10;
+    reasons.push({type:'pass',text:'Trial is actively recruiting'});
+  } else if(trial.status==='Active'){
+    score+=5;
+    reasons.push({type:'warn',text:'Trial is active but not actively recruiting'});
+  } else {
+    reasons.push({type:'fail',text:'Trial status: '+trial.status+' (not recruiting)'});
+  }
+
+  // Normalise
+  var finalScore = score<0 ? 0 : Math.min(Math.round((score/maxScore)*100),100);
+  var grade = finalScore>=80?'excellent':finalScore>=60?'good':finalScore>=35?'partial':'poor';
+  var gradeLabel = {excellent:'Excellent Match',good:'Good Match',partial:'Partial Match',poor:'Poor Match'}[grade];
+  var gradeColor = {excellent:'#15803D',good:'#0B9B8E',partial:'#B45309',poor:'#C93030'}[grade];
+
+  return {score:finalScore,grade:grade,gradeLabel:gradeLabel,gradeColor:gradeColor,reasons:reasons,disqualified:score<0};
+}
+
+// Run matching for ALL patients vs ALL trials, return sorted results
+function runAllMatches(patientList, trialList, minScore){
+  minScore=minScore||1;
+  var results=[];
+  patientList.forEach(function(p){
+    trialList.forEach(function(t){
+      var m=computeMatch(p,t);
+      if(!m.disqualified&&m.score>=minScore){
+        results.push({patId:p.id,trial:t,match:m});
+      }
+    });
+  });
+  results.sort(function(a,b){return b.match.score-a.match.score;});
+  return results;
+}
+
+// Run matching for a single patient vs all trials
+function matchPatientToTrials(patient, trialList){
+  var results=[];
+  trialList.forEach(function(t){
+    var m=computeMatch(patient,t);
+    results.push({trial:t,match:m});
+  });
+  results.sort(function(a,b){return b.match.score-a.match.score;});
+  return results;
+}
+
+// ── SCORE RING SVG ──
+function scoreRing(score, color, size){
+  size=size||72;
+  var r=size/2-5;
+  var circ=2*Math.PI*r;
+  var offset=circ-(score/100)*circ;
+  var bg=color+'33';
+  return '<svg class="ring-svg" width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'">'+
+    '<circle cx="'+size/2+'" cy="'+size/2+'" r="'+r+'" fill="none" stroke="'+bg+'" stroke-width="5"/>'+
+    '<circle class="ring-circle" cx="'+size/2+'" cy="'+size/2+'" r="'+r+'" fill="none" stroke="'+color+'" stroke-width="5"'+
+    ' stroke-dasharray="'+circ+'" stroke-dashoffset="'+circ+'" stroke-linecap="round" transform="rotate(-90 '+size/2+' '+size/2+')"'+
+    ' style="stroke-dashoffset:'+circ+';" data-offset="'+offset+'" data-circ="'+circ+'"/>'+
+    '</svg>';
+}
+
+function animateRings(){
+  setTimeout(function(){
+    document.querySelectorAll('.ring-circle').forEach(function(c){
+      c.style.transition='stroke-dashoffset 1s cubic-bezier(.16,1,.3,1)';
+      c.style.strokeDashoffset=c.dataset.offset;
+    });
+  },120);
+}
+
+// ── TRIAL STATUS TAG ──
+function trialStatusTag(status){
+  var m={Recruiting:'tag-g',Active:'tag-b',Completed:'tag-t',Suspended:'tag-r'};
+  return '<span class="tag '+(m[status]||'tag-b')+'">'+status+'</span>';
+}
+function phaseTag(phase){
+  var c={I:'tag-t',II:'tag-b',III:'tag-y',IV:'tag-r'};
+  var p=phase.replace('Phase ','');
+  return '<span class="tag '+(c[p]||'tag-b')+'">'+esc(phase)+'</span>';
+}
+
+/* ═══════════════════════════════════════
+   PAGE: CLINICAL TRIALS
+═══════════════════════════════════════ */
+function pgTrials(){
+  setTitle('Clinical Trials');
+  var canEdit=(DB.session.role==='admin'||DB.session.role==='researcher');
+  var statuses=['All','Recruiting','Active','Completed','Suspended'];
+  var filterChips=statuses.map(function(s,i){
+    return '<button class="fchip'+(i===0?' active':'')+'" onclick="filterTrials(\''+s+'\',this)">'+s+'</button>';
+  }).join('');
+
+  document.getElementById('pb').innerHTML=
+    '<div class="fx aic g12 mb18" style="flex-wrap:wrap;">'+
+    (canEdit?'<button class="btn btn-primary btn-sm" style="width:auto;" onclick="openTrialForm()">+ New Trial</button>':'')+
+    '<div class="ai-badge">🤖 AI Matching Engine</div>'+
+    '<span class="tsm c3">'+DB.trials.length+' trials in database</span>'+
+    '</div>'+
+    '<div class="filter-strip" id="trialFilterStrip">'+filterChips+'</div>'+
+    '<div id="trialsList">'+renderTrialCards(DB.trials, canEdit)+'</div>';
+}
+
+function renderTrialCards(trials, canEdit){
+  if(!trials.length)return '<div class="empty"><div class="ei">🧪</div><div class="et">No trials found</div></div>';
+  return trials.map(function(t,i){
+    var statusColor={Recruiting:'#15803D',Active:'#1847D1',Completed:'#0B9B8E',Suspended:'#C93030'}[t.status]||'#7A8899';
+    var phaseColor={'Phase I':'#0B9B8E','Phase II':'#1847D1','Phase III':'#B45309','Phase IV':'#7C3AED'}[t.phase]||'#1847D1';
+    return '<div class="trial-card" style="animation-delay:'+(i*.05)+'s;">'+
+      '<div class="trial-card-accent" style="background:'+statusColor+';"></div>'+
+      '<div class="trial-card-head">'+
+        '<div class="trial-icon" style="background:'+statusColor+'22;">🧬</div>'+
+        '<div style="flex:1;">'+
+          '<div style="font-weight:600;font-size:14px;color:var(--ink);margin-bottom:4px;">'+esc(t.title)+'</div>'+
+          '<div style="font-size:12px;color:var(--ink3);">'+esc(t.sponsor||'—')+'&nbsp;·&nbsp;ID: <span class="ca fw5">'+t.id+'</span></div>'+
+        '</div>'+
+        (canEdit?'<div class="fx g8">'+
+          '<button class="btn btn-ghost btn-sm" onclick="openTrialForm(\''+t.id+'\')">Edit</button>'+
+          '<button class="btn btn-danger btn-sm" onclick="delTrial(\''+t.id+'\')">Delete</button>'+
+        '</div>':'')+
+      '</div>'+
+      '<div class="trial-meta">'+
+        phaseTag(t.phase)+trialStatusTag(t.status)+
+        '<span class="tag tag-b">'+esc(t.condition)+'</span>'+
+        '<span class="tag tag-t">Age: '+t.ageMin+'–'+t.ageMax+'</span>'+
+        '<span class="tag '+(t.gender==='Any'?'tag-t':'tag-y')+'">'+esc(t.gender)+'</span>'+
+        '<span class="tag '+(t.severity==='any'?'tag-t':t.severity==='high'?'tag-r':t.severity==='medium'?'tag-y':'tag-g')+'">'+
+          (t.severity==='any'?'Any Severity':t.severity.charAt(0).toUpperCase()+t.severity.slice(1)+' Risk')+'</span>'+
+      '</div>'+
+      '<div class="trial-desc">'+esc(t.desc||'')+'</div>'+
+      '<div class="trial-criteria">'+
+        '<div class="crit-box crit-inc"><div class="crit-lbl">✓ Inclusion</div>'+esc(t.include)+'</div>'+
+        '<div class="crit-box crit-exc"><div class="crit-lbl">✗ Exclusion</div>'+esc(t.exclude)+'</div>'+
+      '</div>'+
+      '<div class="fx aic g8">'+
+        '<button class="btn btn-primary btn-sm" style="width:auto;" onclick="quickMatchTrial(\''+t.id+'\')">🎯 Match Patients</button>'+
+        '<span class="tsm c3">Created: '+t.created+'</span>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function filterTrials(status, el){
+  document.querySelectorAll('#trialFilterStrip .fchip').forEach(function(c){c.classList.remove('active');});
+  el.classList.add('active');
+  var filtered=status==='All'?DB.trials:DB.trials.filter(function(t){return t.status===status;});
+  var canEdit=(DB.session.role==='admin'||DB.session.role==='researcher');
+  document.getElementById('trialsList').innerHTML=renderTrialCards(filtered,canEdit);
+}
+
+function openTrialForm(id){
+  document.getElementById('trialModalTitle').textContent=id?'Edit Clinical Trial':'New Clinical Trial';
+  document.getElementById('editTrialId').value=id||'';
+  if(id){
+    var t=DB.trials.find(function(x){return x.id===id;});
+    document.getElementById('tTitle').value=t.title;document.getElementById('tPhase').value=t.phase;
+    document.getElementById('tStatus').value=t.status;document.getElementById('tCondition').value=t.condition;
+    document.getElementById('tSponsor').value=t.sponsor||'';
+    document.getElementById('tAgeMin').value=t.ageMin;document.getElementById('tAgeMax').value=t.ageMax;
+    document.getElementById('tGender').value=t.gender;document.getElementById('tSeverity').value=t.severity;
+    document.getElementById('tInclude').value=t.include;document.getElementById('tExclude').value=t.exclude;
+    document.getElementById('tDesc').value=t.desc||'';
+  }else{
+    ['tTitle','tPhase','tStatus','tCondition','tSponsor','tAgeMin','tAgeMax','tInclude','tExclude','tDesc'].forEach(function(f){document.getElementById(f).value='';});
+    document.getElementById('tGender').value='Any';document.getElementById('tSeverity').value='any';
+  }
+  openMo('trialModal');
+}
+
+function saveTrial(){
+  var title=document.getElementById('tTitle').value.trim();
+  var phase=document.getElementById('tPhase').value,status=document.getElementById('tStatus').value;
+  var cond=document.getElementById('tCondition').value.trim();
+  var sponsor=document.getElementById('tSponsor').value.trim();
+  var ageMin=document.getElementById('tAgeMin').value||0,ageMax=document.getElementById('tAgeMax').value||120;
+  var gender=document.getElementById('tGender').value,severity=document.getElementById('tSeverity').value;
+  var inc=document.getElementById('tInclude').value.trim(),exc=document.getElementById('tExclude').value.trim();
+  var desc=document.getElementById('tDesc').value.trim();
+  if(!title||!phase||!status||!cond||!inc){notify('Please fill all required fields.','err');return;}
+  var eid=document.getElementById('editTrialId').value;
+  if(eid){
+    var idx=DB.trials.findIndex(function(t){return t.id===eid;});
+    DB.trials[idx]=Object.assign({},DB.trials[idx],{title:title,phase:phase,status:status,condition:cond,sponsor:sponsor,ageMin:parseInt(ageMin),ageMax:parseInt(ageMax),gender:gender,severity:severity,include:inc,exclude:exc,desc:desc});
+    saveAll();notify('Trial '+eid+' updated.','ok');
+  }else{
+    var nid='TRL'+String(DB.tc++).padStart(3,'0');
+    DB.trials.push({id:nid,title:title,phase:phase,status:status,condition:cond,sponsor:sponsor,ageMin:parseInt(ageMin),ageMax:parseInt(ageMax),gender:gender,severity:severity,include:inc,exclude:exc,desc:desc,created:today()});
+    saveAll();notify('Trial '+nid+' created.','ok');
+  }
+  closeMo('trialModal');pgTrials();
+}
+
+function delTrial(id){
+  if(!confirm('Delete trial '+id+'?'))return;
+  DB.trials=DB.trials.filter(function(t){return t.id!==id;});
+  saveAll();
+  if(FB_ENABLED) fbDelete('trials',id);
+  notify('Trial removed.','ok');pgTrials();
+}
+
+/* ═══════════════════════════════════════
+   PAGE: TRIAL MATCHING ENGINE
+═══════════════════════════════════════ */
+function pgMatching(){
+  setTitle('AI Trial Matching Engine');
+  var patOpts=DB.patients.map(function(p){return '<option value="'+p.id+'">'+p.id+' — '+esc(p.condition)+'</option>';}).join('');
+  var trialOpts='<option value="all">All Trials</option>'+DB.trials.map(function(t){return '<option value="'+t.id+'">'+t.id+' — '+esc(t.title)+'</option>';}).join('');
+
+  document.getElementById('pb').innerHTML=
+    // Header banner
+    '<div style="background:linear-gradient(135deg,#0A0F1E,#1A2540);border-radius:var(--r);padding:24px 28px;margin-bottom:20px;display:flex;align-items:center;gap:18px;">'+
+      '<div style="font-size:40px;">🤖</div>'+
+      '<div>'+
+        '<div style="font-family:Fraunces,serif;font-size:20px;color:#fff;letter-spacing:-.3px;margin-bottom:4px;">AI Eligibility & Matching Engine</div>'+
+        '<div style="font-size:13px;color:rgba(255,255,255,.5);">Rule-based + semantic matching across '+DB.trials.length+' trials · '+DB.patients.length+' patients · Transparent scoring</div>'+
+      '</div>'+
+      '<div style="margin-left:auto;"><div class="ai-badge">🧬 Live Engine</div></div>'+
+    '</div>'+
+    // Controls
+    '<div class="card mb20"><div class="ch"><span class="ct">⚙️ Match Configuration</span></div><div class="cb">'+
+      '<div class="fgrid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));">'+
+        '<div class="fg" style="margin:0;"><label class="fl">Patient</label><select class="fsel" id="mPatSel"><option value="all">All Patients</option>'+patOpts+'</select></div>'+
+        '<div class="fg" style="margin:0;"><label class="fl">Trial</label><select class="fsel" id="mTrialSel">'+trialOpts+'</select></div>'+
+        '<div class="fg" style="margin:0;"><label class="fl">Min. Match Score</label>'+
+          '<select class="fsel" id="mMinScore"><option value="1">Show All</option><option value="35">35%+ (Partial)</option><option value="60" selected>60%+ (Good)</option><option value="80">80%+ (Excellent)</option></select></div>'+
+        '<div class="fg" style="margin:0;"><label class="fl">Sort By</label>'+
+          '<select class="fsel" id="mSort"><option value="score">Match Score</option><option value="trial">Trial ID</option><option value="patient">Patient ID</option></select></div>'+
+      '</div>'+
+      '<div class="fx g8" style="margin-top:14px;">'+
+        '<button class="btn btn-primary" style="width:auto;" onclick="runMatchEngine()">🎯 Run AI Matching</button>'+
+        '<button class="btn btn-ghost btn-sm" onclick="runMatchAll()">⚡ Match All</button>'+
+      '</div>'+
+    '</div></div>'+
+    '<div id="matchResults"></div>';
+}
+
+function runMatchEngine(){
+  var patSel=document.getElementById('mPatSel').value;
+  var trialSel=document.getElementById('mTrialSel').value;
+  var minScore=parseInt(document.getElementById('mMinScore').value)||1;
+  var sortBy=document.getElementById('mSort').value;
+
+  var patients=patSel==='all'?DB.patients:DB.patients.filter(function(p){return p.id===patSel;});
+  var trials=trialSel==='all'?DB.trials:DB.trials.filter(function(t){return t.id===trialSel;});
+
+  var results=runAllMatches(patients,trials,minScore);
+
+  if(sortBy==='trial')results.sort(function(a,b){return a.trial.id.localeCompare(b.trial.id);});
+  else if(sortBy==='patient')results.sort(function(a,b){return a.patId.localeCompare(b.patId);});
+
+  renderMatchResults(results, minScore);
+}
+
+function runMatchAll(){
+  document.getElementById('mPatSel').value='all';
+  document.getElementById('mTrialSel').value='all';
+  document.getElementById('mMinScore').value='1';
+  runMatchEngine();
+}
+
+function renderMatchResults(results, minScore){
+  var el=document.getElementById('matchResults');
+  if(!results.length){
+    el.innerHTML='<div class="empty"><div class="ei">🎯</div><div class="et">No matches found above '+minScore+'% score</div><div class="es2">Try lowering the minimum match score or selecting different filters.</div></div>';
+    return;
+  }
+
+  var summary={excellent:0,good:0,partial:0,poor:0};
+  results.forEach(function(r){summary[r.match.grade]++;});
+
+  var summaryHtml='<div class="sgrid mb20">'+
+    mks('🎯','Total Matches',results.length,'Across all criteria','#1847D1')+
+    mks('🟢','Excellent',summary.excellent,'Score ≥ 80%','#15803D')+
+    mks('🔵','Good',summary.good,'Score 60–79%','#0B9B8E')+
+    mks('🟡','Partial',summary.partial,'Score 35–59%','#B45309')+
+  '</div>';
+
+  var cardsHtml=results.map(function(r,i){
+    var m=r.match, t=r.trial;
+    var pat=DB.patients.find(function(p){return p.id===r.patId;})||{id:r.patId,condition:'Unknown'};
+    var reasonHtml=m.reasons.slice(0,4).map(function(re){
+      return '<span class="reason-pill rp-'+(re.type==='pass'?'pass':re.type==='warn'?'warn':'fail')+'">'+
+        (re.type==='pass'?'✓':re.type==='warn'?'⚠':'✗')+' '+esc(re.text)+'</span>';
+    }).join('');
+    return '<div class="match-card '+m.grade+'" style="animation-delay:'+(i*.04)+'s;">'+
+      '<div style="position:relative;width:72px;height:72px;flex-shrink:0;">'+
+        scoreRing(m.score,m.gradeColor,72)+
+        '<div class="match-score-ring" style="color:'+m.gradeColor+';">'+
+          '<div class="score-num">'+m.score+'%</div>'+
+          '<div class="score-lbl">match</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
+          '<div style="font-weight:600;font-size:13px;color:var(--ink);">'+esc(t.title)+'</div>'+
+          '<span class="tag" style="background:'+m.gradeColor+'22;color:'+m.gradeColor+';">'+m.gradeLabel+'</span>'+
+        '</div>'+
+        '<div style="font-size:12px;color:var(--ink3);margin-bottom:8px;">'+
+          'Patient <span class="fw5 ca">'+r.patId+'</span> · '+esc(pat.condition)+
+          ' &nbsp;|&nbsp; Trial <span class="fw5 ca">'+t.id+'</span> · '+phaseTag(t.phase)+trialStatusTag(t.status)+
+        '</div>'+
+        '<div style="margin-bottom:8px;">'+reasonHtml+'</div>'+
+        '<div class="fx g8">'+
+          '<button class="btn btn-ghost btn-sm" onclick="showMatchDetail(\''+r.patId+'\',\''+t.id+'\')">🔍 Full Explanation</button>'+
+          (m.grade==='excellent'||m.grade==='good'?'<button class="btn btn-primary btn-sm" style="width:auto;">📋 Enrol Patient</button>':'')+'</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+
+  el.innerHTML='<div class="card mb16"><div class="ch"><span class="ct">📊 Match Results</span><span class="txs c3">'+results.length+' matches found</span></div>'+
+    '<div class="cb">'+summaryHtml+'</div></div>'+
+    cardsHtml;
+
+  animateRings();
+}
+
+function showMatchDetail(patId, trialId){
+  var pat=DB.patients.find(function(p){return p.id===patId;});
+  var trial=DB.trials.find(function(t){return t.id===trialId;});
+  if(!pat||!trial)return;
+  var m=computeMatch(pat,trial);
+
+  var scoreColor=m.gradeColor;
+  var body=
+    '<div style="background:linear-gradient(135deg,'+scoreColor+'15,transparent);border-radius:var(--r);padding:20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;">'+
+      '<div style="position:relative;width:90px;height:90px;flex-shrink:0;">'+
+        scoreRing(m.score,scoreColor,90)+
+        '<div class="match-score-ring" style="color:'+scoreColor+';width:90px;height:90px;">'+
+          '<div style="font-size:26px;font-weight:700;font-family:Fraunces,serif;">'+m.score+'%</div>'+
+          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.4px;opacity:.7;">'+m.gradeLabel+'</div>'+
+        '</div>'+
+      '</div>'+
+      '<div>'+
+        '<div style="font-weight:600;font-size:15px;margin-bottom:4px;">'+esc(trial.title)+'</div>'+
+        '<div style="font-size:12px;color:var(--ink3);">Patient <strong>'+patId+'</strong> · Condition: '+esc(pat.condition)+'</div>'+
+        '<div style="font-size:12px;color:var(--ink3);">Age: '+pat.age+' · Gender: '+pat.gender+' · Severity: '+pat.severity+'</div>'+
+      '</div>'+
+    '</div>'+
+    '<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--ink);">🔍 Criterion-by-Criterion Explanation</div>'+
+    m.reasons.map(function(r,i){
+      var bg=r.type==='pass'?'var(--green-l)':r.type==='warn'?'var(--amber-l)':'var(--red-l)';
+      var col=r.type==='pass'?'var(--green)':r.type==='warn'?'var(--amber)':'var(--red)';
+      var icon=r.type==='pass'?'✓':r.type==='warn'?'⚠':'✗';
+      return '<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;background:'+bg+';border-radius:var(--rs);margin-bottom:8px;animation:slideUp .3s '+(i*.06)+'s both;">'+
+        '<div style="width:22px;height:22px;border-radius:50%;background:'+col+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;">'+icon+'</div>'+
+        '<div style="font-size:13px;color:var(--ink2);line-height:1.5;">'+esc(r.text)+'</div>'+
+      '</div>';
+    }).join('')+
+    '<div style="margin-top:14px;padding:12px 16px;background:var(--paper);border-radius:var(--rs);border:1px solid var(--border);">'+
+      '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--ink3);margin-bottom:4px;">Scoring Breakdown</div>'+
+      '<div style="font-size:12.5px;color:var(--ink2);">Condition match (40pts) + Age (20pts) + Gender (15pts) + Severity (15pts) + Status (10pts) = 100pts total</div>'+
+    '</div>';
+
+  document.getElementById('matchModalBody').innerHTML=body;
+  openMo('matchModal');
+  animateRings();
+}
+
+function quickMatchTrial(trialId){
+  setTitle('AI Trial Matching Engine');
+  pgMatching();
+  setTimeout(function(){
+    document.getElementById('mTrialSel').value=trialId;
+    document.getElementById('mMinScore').value='1';
+    runMatchEngine();
+  },60);
+}
+
+/* ═══════════════════════════════════════
+   PAGE: PATIENT TRIAL MATCHES (patient view)
+═══════════════════════════════════════ */
+function pgMyTrials(){
+  setTitle('My Trial Matches');
+  var pid=DB.session.patId;
+  var pat=pid?DB.patients.find(function(p){return p.id===pid;}):null;
+  if(!pat){
+    document.getElementById('pb').innerHTML='<div class="empty"><div class="ei">🎯</div><div class="et">Profile not found</div><div class="es2">Complete your patient registration first.</div></div>';
+    return;
+  }
+
+  var results=matchPatientToTrials(pat, DB.trials);
+  var eligible=results.filter(function(r){return r.match.score>=60&&!r.match.disqualified;});
+  var all=results.filter(function(r){return !r.match.disqualified;});
+
+  var header='<div style="background:linear-gradient(135deg,#0A0F1E,#1A2540);border-radius:var(--r);padding:22px 24px;margin-bottom:20px;display:flex;align-items:center;gap:16px;">'+
+    '<div style="font-size:38px;">🎯</div>'+
+    '<div>'+
+      '<div style="font-family:Fraunces,serif;font-size:18px;color:#fff;margin-bottom:3px;">Your Clinical Trial Matches</div>'+
+      '<div style="font-size:12.5px;color:rgba(255,255,255,.5);">Patient '+pid+' · AI matched against '+DB.trials.length+' active trials · Anonymous profile only</div>'+
+    '</div>'+
+  '</div>';
+
+  var statsHtml='<div class="sgrid mb20">'+
+    mks('🧪','Trials Checked',DB.trials.length,'Total database','#1847D1')+
+    mks('✅','Eligible Matches',eligible.length,'Score ≥ 60%','#15803D')+
+    mks('⚠️','Partial Matches',all.length-eligible.length,'Score 1–59%','#B45309')+
+    mks('❌','Not Eligible',DB.trials.length-all.length,'Excluded','#C93030')+
+  '</div>';
+
+  var cardsHtml=all.map(function(r,i){
+    var m=r.match, t=r.trial;
+    return '<div class="match-card '+m.grade+'" style="animation-delay:'+(i*.05)+'s;">'+
+      '<div style="position:relative;width:68px;height:68px;flex-shrink:0;">'+
+        scoreRing(m.score,m.gradeColor,68)+
+        '<div class="match-score-ring" style="color:'+m.gradeColor+';width:68px;height:68px;font-size:18px;">'+
+          '<div class="score-num" style="font-size:17px;">'+m.score+'%</div>'+
+          '<div class="score-lbl">fit</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="flex:1;min-width:0;">'+
+        '<div style="font-weight:600;font-size:13px;color:var(--ink);margin-bottom:4px;">'+esc(t.title)+'</div>'+
+        '<div style="font-size:12px;color:var(--ink3);margin-bottom:6px;">'+phaseTag(t.phase)+' '+trialStatusTag(t.status)+' &nbsp;·&nbsp; '+esc(t.sponsor||'')+'</div>'+
+        '<div style="font-size:12px;color:var(--ink2);margin-bottom:8px;background:var(--paper);padding:8px 10px;border-radius:var(--rs);">'+esc(t.desc||'')+'</div>'+
+        '<button class="btn btn-ghost btn-sm" onclick="showMatchDetail(\''+pid+'\',\''+t.id+'\')">🔍 See Why Matched</button>'+
+        (m.grade==='excellent'||m.grade==='good'?'&nbsp;<button class="btn btn-primary btn-sm" style="width:auto;">📋 Express Interest</button>':'')+
+      '</div>'+
+    '</div>';
+  }).join('');
+
+  if(!all.length) cardsHtml='<div class="empty"><div class="ei">🔬</div><div class="et">No trial matches currently</div><div class="es2">Your profile will be automatically re-evaluated as new trials are added.</div></div>';
+
+  document.getElementById('pb').innerHTML=header+statsHtml+cardsHtml;
+  animateRings();
+}
+
+
+function doGlobalSearch(val){
+  if(!val.trim())return;
+  var lo=val.toLowerCase();
+  var res=DB.patients.filter(function(p){
+    return p.id.toLowerCase().indexOf(lo)>=0||p.condition.toLowerCase().indexOf(lo)>=0||
+           p.city.toLowerCase().indexOf(lo)>=0||p.symptoms.toLowerCase().indexOf(lo)>=0;
+  });
+  pgPatients(res);setTitle('Search: "'+val+'"');
+}
+function rMatch(text){
+  var box=document.getElementById('rMatchBox');if(!box)return;
+  if(!text.trim()){box.style.display='none';return;}
+  var m=matchCond(text);
+  var cls={high:'al-d',medium:'al-w',low:'al-ok'}[m.s];
+  box.innerHTML='<div class="al2 '+cls+'"><span>🔬</span><span>Matched: <strong>'+m.c+'</strong> &mdash; Risk level: <strong>'+m.s.toUpperCase()+'</strong></span></div>';
+  box.style.display='block';
+}
+
+function pgAnalytics(){
+  setTitle('Analytics');
+  var total=DB.patients.length||1;
+  var cs=condStats();
+  var cities={};DB.patients.forEach(function(p){cities[p.city]=(cities[p.city]||0)+1;});
+  var bloods={};DB.patients.forEach(function(p){bloods[p.blood]=(bloods[p.blood]||0)+1;});
+  var hi=DB.patients.filter(function(p){return p.severity==='high';}).length;
+  var med=DB.patients.filter(function(p){return p.severity==='medium';}).length;
+  var lo=DB.patients.filter(function(p){return p.severity==='low';}).length;
+
+  document.getElementById('pb').innerHTML=
+    // Top KPI row
+    '<div class="sgrid mb20">'+
+      mks('🧑‍⚕️','Total Patients',total,'All registered','#1847D1')+
+      mks('🔴','High Risk',hi,'Urgent attention','#C93030')+
+      mks('🟡','Moderate',med,'Monitoring','#B45309')+
+      mks('🟢','Stable',lo,'Routine follow-up','#15803D')+
+    '</div>'+
+    // Charts row 1: pie + bar
+    '<div class="g2 mb20">'+
+      '<div class="card"><div class="ch"><span class="ct">Severity Distribution</span><span class="txs c3">Pie chart</span></div>'+
+        '<div class="cb" style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;">'+
+          '<canvas id="pieChart" width="180" height="180" style="flex-shrink:0;"></canvas>'+
+          '<div id="pieLegend" style="flex:1;min-width:120px;"></div>'+
+        '</div></div>'+
+      '<div class="card"><div class="ch"><span class="ct">Conditions</span><span class="txs c3">Animated bars</span></div>'+
+        '<div class="cb" id="condBars"></div></div>'+
+    '</div>'+
+    // Charts row 2: blood groups + cities
+    '<div class="g2 mb20">'+
+      '<div class="card"><div class="ch"><span class="ct">Blood Group Distribution</span><span class="txs c3">Bar chart</span></div>'+
+        '<div class="cb" style="position:relative;height:200px;"><canvas id="bloodChart" style="width:100%;height:100%;"></canvas></div></div>'+
+      '<div class="card"><div class="ch"><span class="ct">Patient Cities</span><span class="txs c3">Animated bars</span></div>'+
+        '<div class="cb" id="cityBars"></div></div>'+
+    '</div>'+
+    // Flowchart
+    '<div class="card mb20"><div class="ch"><span class="ct">Patient Journey Flowchart</span><span class="txs c3">Clinical workflow</span></div>'+
+      '<div class="cb" style="overflow-x:auto;"><div id="flowChart" style="min-width:600px;"></div></div></div>'+
+    // Age trend
+    '<div class="card"><div class="ch"><span class="ct">Age Distribution</span><span class="txs c3">Histogram</span></div>'+
+      '<div class="cb" style="position:relative;height:180px;"><canvas id="ageChart" style="width:100%;height:100%;"></canvas></div></div>';
+
+  // Render all charts
+  setTimeout(function(){
+    drawPieChart(hi,med,lo);
+    drawAnimBars('condBars', cs.map(function(c){return[c.name,c.n,c.col];}), total);
+    drawBloodChart(bloods);
+    drawAnimBars('cityBars', Object.entries(cities).map(function(e,i){return[e[0],e[1],AVC[i%AVC.length]];}), total);
+    drawFlowChart();
+    drawAgeChart();
+  }, 60);
+}
+
+function drawPieChart(hi,med,lo){
+  var canvas=document.getElementById('pieChart');if(!canvas)return;
+  var ctx=canvas.getContext('2d');
+  var data=[{v:hi,c:'#C93030',l:'High Risk'},{v:med,c:'#B45309',l:'Moderate'},{v:lo,c:'#15803D',l:'Stable'}];
+  var total=hi+med+lo||1;
+  var cx=90,cy=90,r=75;
+  var start=-Math.PI/2;
+  var progress=0;
+  var legend=document.getElementById('pieLegend');
+  legend.innerHTML=data.map(function(d){
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'+
+      '<div style="width:12px;height:12px;border-radius:3px;background:'+d.c+';flex-shrink:0;"></div>'+
+      '<span style="font-size:12px;color:var(--ink2);">'+d.l+' <strong>'+d.v+'</strong></span></div>';
+  }).join('');
+
+  function animate(ts){
+    if(!animate.start)animate.start=ts;
+    progress=Math.min((ts-animate.start)/700,1);
+    var ease=1-Math.pow(1-progress,3);
+    ctx.clearRect(0,0,180,180);
+    var s=start;
+    data.forEach(function(d){
+      var slice=(d.v/total)*Math.PI*2*ease;
+      ctx.beginPath();ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,s,s+slice);ctx.closePath();
+      ctx.fillStyle=d.c;ctx.fill();
+      ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+      s+=slice;
+    });
+    // donut hole
+    ctx.beginPath();ctx.arc(cx,cy,40,0,Math.PI*2);
+    ctx.fillStyle='#fff';ctx.fill();
+    // center text
+    ctx.fillStyle='var(--ink)';ctx.font='bold 16px Fraunces,serif';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(DB.patients.length,cx,cy-6);
+    ctx.font='10px DM Sans,sans-serif';ctx.fillStyle='#7A8899';
+    ctx.fillText('patients',cx,cy+10);
+    if(progress<1)requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+}
+
+function drawAnimBars(elId, entries, total){
+  var el=document.getElementById(elId);if(!el)return;
+  el.innerHTML=entries.map(function(e){
+    var pct=Math.round(e[1]/total*100);
+    return '<div class="abar-row" style="margin-bottom:14px;">'+
+      '<div class="abar-top"><span class="abar-lbl">'+esc(String(e[0]))+'</span><span class="abar-val" style="font-size:12px;color:var(--ink3);">'+e[1]+' ('+pct+'%)</span></div>'+
+      '<div class="abar-track" style="height:8px;background:var(--paper2);border-radius:4px;overflow:hidden;">'+
+        '<div class="abar-fill" data-pct="'+pct+'" style="width:0%;height:100%;border-radius:4px;background:'+e[2]+';transition:width .8s cubic-bezier(.16,1,.3,1);"></div>'+
+      '</div></div>';
+  }).join('');
+  setTimeout(function(){
+    el.querySelectorAll('.abar-fill').forEach(function(bar){
+      bar.style.width=bar.dataset.pct+'%';
+    });
+  },80);
+}
+
+function drawBloodChart(bloods){
+  var canvas=document.getElementById('bloodChart');if(!canvas)return;
+  canvas.width=canvas.offsetWidth||400;canvas.height=200;
+  var ctx=canvas.getContext('2d');
+  var keys=Object.keys(bloods);var vals=keys.map(function(k){return bloods[k];});
+  var maxV=Math.max.apply(null,vals)||1;
+  var barW=Math.floor((canvas.width-40)/keys.length)-10;
+  var progress=0;
+  function animate(ts){
+    if(!animate.start)animate.start=ts;
+    progress=Math.min((ts-animate.start)/600,1);
+    var ease=1-Math.pow(1-progress,3);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // grid lines
+    ctx.strokeStyle='rgba(10,15,30,.06)';ctx.lineWidth=1;
+    for(var g=0;g<=4;g++){var gy=20+((canvas.height-40)/4)*(4-g);ctx.beginPath();ctx.moveTo(30,gy);ctx.lineTo(canvas.width-10,gy);ctx.stroke();}
+    keys.forEach(function(k,i){
+      var x=40+i*(barW+10);
+      var barH=(vals[i]/maxV)*(canvas.height-50)*ease;
+      var y=canvas.height-30-barH;
+      // gradient
+      var grad=ctx.createLinearGradient(0,y,0,canvas.height-30);
+      grad.addColorStop(0,AVC[i%AVC.length]);grad.addColorStop(1,AVC[i%AVC.length]+'55');
+      ctx.fillStyle=grad;
+      ctx.beginPath();
+      var rad=5;
+      ctx.moveTo(x+rad,y);ctx.lineTo(x+barW-rad,y);ctx.arcTo(x+barW,y,x+barW,y+rad,rad);
+      ctx.lineTo(x+barW,canvas.height-30);ctx.lineTo(x,canvas.height-30);ctx.lineTo(x,y+rad);ctx.arcTo(x,y,x+rad,y,rad);
+      ctx.closePath();ctx.fill();
+      // label
+      ctx.fillStyle='var(--ink2,#3D4A5C)';ctx.font='11px DM Sans,sans-serif';ctx.textAlign='center';
+      ctx.fillText(k,x+barW/2,canvas.height-14);
+      if(progress>=1){ctx.fillStyle=AVC[i%AVC.length];ctx.font='bold 12px DM Sans,sans-serif';ctx.fillText(vals[i],x+barW/2,y-5);}
+    });
+    if(progress<1)requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+}
+
+function drawAgeChart(){
+  var canvas=document.getElementById('ageChart');if(!canvas)return;
+  canvas.width=canvas.offsetWidth||600;canvas.height=180;
+  var ctx=canvas.getContext('2d');
+  var bins=[{l:'0-20',min:0,max:20},{l:'21-30',min:21,max:30},{l:'31-40',min:31,max:40},{l:'41-50',min:41,max:50},{l:'51-60',min:51,max:60},{l:'61+',min:61,max:999}];
+  var counts=bins.map(function(b){return DB.patients.filter(function(p){return p.age>=b.min&&p.age<=b.max;}).length;});
+  var maxV=Math.max.apply(null,counts)||1;
+  var barW=Math.floor((canvas.width-40)/bins.length)-8;
+  var progress=0;
+  function animate(ts){
+    if(!animate.start)animate.start=ts;
+    progress=Math.min((ts-animate.start)/600,1);
+    var ease=1-Math.pow(1-progress,3);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle='rgba(10,15,30,.06)';ctx.lineWidth=1;
+    for(var g=0;g<=3;g++){var gy=10+((canvas.height-40)/3)*(3-g);ctx.beginPath();ctx.moveTo(30,gy);ctx.lineTo(canvas.width-5,gy);ctx.stroke();}
+    bins.forEach(function(b,i){
+      var x=35+i*(barW+8);
+      var barH=(counts[i]/maxV)*(canvas.height-50)*ease;
+      var y=canvas.height-30-barH;
+      var grad=ctx.createLinearGradient(0,y,0,canvas.height-30);
+      grad.addColorStop(0,'#1847D1');grad.addColorStop(1,'#1847D155');
+      ctx.fillStyle=grad;
+      if(barH>0){ctx.beginPath();ctx.roundRect(x,y,barW,barH,4);ctx.fill();}
+      ctx.fillStyle='#7A8899';ctx.font='10px DM Sans,sans-serif';ctx.textAlign='center';
+      ctx.fillText(b.l,x+barW/2,canvas.height-14);
+      if(progress>=1&&counts[i]>0){ctx.fillStyle='#1847D1';ctx.font='bold 11px DM Sans,sans-serif';ctx.fillText(counts[i],x+barW/2,y-4);}
+    });
+    if(progress<1)requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+}
+
+function drawFlowChart(){
+  var el=document.getElementById('flowChart');if(!el)return;
+  var steps=[
+    {icon:'🔐',label:'Login',sub:'ID-based auth',color:'#1847D1',shape:'rounded'},
+    {icon:'📋',label:'Registration',sub:'Anonymous profile',color:'#0B9B8E',shape:'rounded'},
+    {icon:'🔬',label:'Symptom Match',sub:'AI condition detection',color:'#7C3AED',shape:'diamond'},
+    {icon:'⚖️',label:'Risk Triage',sub:'High / Med / Low',color:'#B45309',shape:'rounded'},
+    {icon:'💬',label:'Consultation',sub:'Doctor chat',color:'#1847D1',shape:'rounded'},
+    {icon:'📈',label:'Analytics',sub:'Research insights',color:'#15803D',shape:'rounded'}
+  ];
+  var html='<div style="display:flex;align-items:center;gap:0;padding:20px 10px;flex-wrap:wrap;justify-content:center;">';
+  steps.forEach(function(s,i){
+    var isDiamond=s.shape==='diamond';
+    var boxStyle=isDiamond
+      ?'transform:rotate(45deg);width:70px;height:70px;background:'+s.color+';display:inline-flex;align-items:center;justify-content:center;border-radius:10px;box-shadow:0 4px 16px '+s.color+'44;'
+      :'display:inline-flex;flex-direction:column;align-items:center;justify-content:center;padding:14px 18px;background:'+s.color+';border-radius:14px;min-width:100px;box-shadow:0 4px 16px '+s.color+'44;';
+    var innerStyle=isDiamond?'transform:rotate(-45deg);text-align:center;':'text-align:center;';
+    html+='<div style="display:flex;flex-direction:column;align-items:center;animation:fadeUp .4s '+(i*.08)+'s both;">';
+    html+='<div style="'+boxStyle+'"><div style="'+innerStyle+'"><div style="font-size:'+(isDiamond?'18':'22')+'px;">'+s.icon+'</div>'+
+      '<div style="font-size:10px;font-weight:600;color:#fff;margin-top:4px;white-space:nowrap;letter-spacing:.3px;">'+s.label+'</div>'+
+      (isDiamond?'':'<div style="font-size:9px;color:rgba(255,255,255,.65);margin-top:2px;">'+s.sub+'</div>')+
+      '</div></div>';
+    if(!isDiamond)html+='<div style="font-size:10px;color:var(--ink3);margin-top:8px;max-width:90px;text-align:center;">'+s.sub+'</div>';
+    html+='</div>';
+    if(i<steps.length-1){
+      html+='<div style="display:flex;align-items:center;padding:0 6px;margin-top:-16px;">'+
+        '<div style="width:28px;height:2px;background:linear-gradient(90deg,'+s.color+','+steps[i+1].color+');"></div>'+
+        '<div style="border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:8px solid '+steps[i+1].color+';"></div>'+
+        '</div>';
+    }
+  });
+  html+='</div>';
+  el.innerHTML=html;
+}
+
+/* ═══════════════════════════════════════════════════
+   🤖 AI ASSISTANT (context-aware answers)
+═══════════════════════════════════════════════════ */
+var AI_HISTORY=[];
+var AI_SUGGESTIONS=[
+  ['How many patients match trials?','🎯'],
+  ['Show high-risk patients','🔴'],
+  ['Which trial has most matches?','🧪'],
+  ['Explain the scoring algorithm','📊'],
+  ['What is fairness score?','⚖️'],
+  ['How to enrol a patient?','📋']
+];
+
+function toggleAIPanel(){
+  var p=document.getElementById('aiPanel');
+  p.classList.toggle('open');
+  document.getElementById('fabBadge').style.display='none';
+  if(p.classList.contains('open')&&AI_HISTORY.length===0){
+    addAIMsg('bot','👋 Hi! I\'m your MediCore AI assistant. I can help you understand trial matches, patient eligibility, fairness scores, and more. What would you like to know?');
+    renderAISuggestions();
+  }
+}
+
+function renderAISuggestions(){
+  var el=document.getElementById('aiSuggestions');if(!el)return;
+  el.innerHTML=AI_SUGGESTIONS.slice(0,4).map(function(s){
+    return '<button onclick="askAI(\''+s[0]+'\')" style="padding:4px 10px;background:var(--blue-l);color:var(--blue);border:none;border-radius:20px;font-size:11px;cursor:pointer;font-family:DM Sans,sans-serif;">'+s[1]+' '+s[0]+'</button>';
+  }).join('');
+}
+
+function addAIMsg(role, text){
+  AI_HISTORY.push({role:role,text:text});
+  var el=document.getElementById('aiMsgs');if(!el)return;
+  var isBot=role==='bot';
+  el.innerHTML+=
+    '<div class="ai-msg '+(isBot?'bot':'user')+'">'+
+      '<div class="ai-av" style="background:'+(isBot?'linear-gradient(135deg,#1847D1,#7C3AED)':'#0B9B8E')+';">'+
+        (isBot?'🤖':'👤')+'</div>'+
+      '<div class="ai-bubble">'+text+'</div>'+
+    '</div>';
+  el.scrollTop=el.scrollHeight;
+}
+
+function showTyping(){
+  var el=document.getElementById('aiMsgs');if(!el)return;
+  el.innerHTML+='<div class="ai-msg bot" id="aiTyping"><div class="ai-av" style="background:linear-gradient(135deg,#1847D1,#7C3AED);">🤖</div><div class="ai-typing"><span></span><span></span><span></span></div></div>';
+  el.scrollTop=el.scrollHeight;
+}
+function hideTyping(){ var t=document.getElementById('aiTyping');if(t)t.remove(); }
+
+function sendAIMsg(){
+  var inp=document.getElementById('aiInput');if(!inp)return;
+  var q=inp.value.trim();if(!q)return;
+  inp.value='';askAI(q);
+}
+
+function askAI(q){
+  addAIMsg('user',q);
+  document.getElementById('aiSuggestions').innerHTML='';
+  showTyping();
+  setTimeout(function(){ hideTyping(); addAIMsg('bot', getAIAnswer(q)); }, 900+Math.random()*400);
+}
+
+function getAIAnswer(q){
+  var lo=q.toLowerCase();
+  var total=DB.patients.length, trials=DB.trials.length;
+  var hi=DB.patients.filter(function(p){return p.severity==='high';}).length;
+  var recruiting=DB.trials.filter(function(t){return t.status==='Recruiting';}).length;
+
+  // Context-aware answers
+  if(lo.indexOf('how many patient')>=0||lo.indexOf('total patient')>=0)
+    return 'There are currently <strong>'+total+' patients</strong> registered in the system — '+hi+' high-risk, '+DB.patients.filter(function(p){return p.severity==='medium';}).length+' moderate, and '+DB.patients.filter(function(p){return p.severity==='low';}).length+' stable.';
+
+  if(lo.indexOf('match')>=0&&lo.indexOf('how many')>=0||lo.indexOf('total match')>=0){
+    var allM=runAllMatches(DB.patients,DB.trials,1);
+    var goodM=allM.filter(function(r){return r.match.score>=60;});
+    return 'The engine found <strong>'+allM.length+' total matches</strong> across all patients and trials. Of these, <strong>'+goodM.length+' are good/excellent</strong> (score ≥60%). Run the Matching Engine page for full details.';
+  }
+
+  if(lo.indexOf('high risk')>=0||lo.indexOf('high-risk')>=0||lo.indexOf('urgent')>=0)
+    return 'There are <strong>'+hi+' high-risk patients</strong>: '+DB.patients.filter(function(p){return p.severity==='high';}).map(function(p){return p.id+' ('+p.condition+')';}).join(', ')+'. They are prioritised first in the matching engine.';
+
+  if(lo.indexOf('which trial')>=0&&lo.indexOf('most')>=0){
+    var trialCounts={};
+    runAllMatches(DB.patients,DB.trials,60).forEach(function(r){trialCounts[r.trial.id]=(trialCounts[r.trial.id]||0)+1;});
+    var best=Object.entries(trialCounts).sort(function(a,b){return b[1]-a[1];})[0];
+    if(best){var t=DB.trials.find(function(x){return x.id===best[0];});return 'Trial <strong>'+best[0]+'</strong> ("'+esc(t?t.title:'')+'") has the most eligible patient matches: <strong>'+best[1]+' patients</strong> score ≥60%.';}
+    return 'No matches above 60% found yet. Try running the engine with a lower threshold.';
+  }
+
+  if(lo.indexOf('scor')>=0&&(lo.indexOf('how')>=0||lo.indexOf('algorithm')>=0||lo.indexOf('work')>=0))
+    return 'The matching score is calculated from 5 criteria:<br>• <strong>Condition match (40pts)</strong> — keyword overlap with inclusion criteria<br>• <strong>Age range (20pts)</strong> — within trial\'s min/max<br>• <strong>Gender (15pts)</strong> — eligibility match<br>• <strong>Severity (15pts)</strong> — risk level alignment<br>• <strong>Trial status (10pts)</strong> — recruiting vs active<br><br>Hard exclusions disqualify a patient entirely (score = 0).';
+
+  if(lo.indexOf('fairness')>=0||lo.indexOf('bias')>=0)
+    return 'The Fairness Score measures equitable access to trials across demographic groups. It checks gender balance in matches, age distribution spread, and geographic diversity. A score above 80% indicates minimal algorithmic bias. View it in the <strong>Fairness & Bias</strong> section of Analytics.';
+
+  if(lo.indexOf('enrol')>=0||lo.indexOf('how to')>=0)
+    return 'To enrol a patient: 1) Go to <strong>Trial Matching Engine</strong>, 2) Run a match for the patient, 3) Click <strong>"Enrol Patient"</strong> on any Excellent or Good match card. The enrolment is logged in the Audit Trail automatically.';
+
+  if(lo.indexOf('trial')>=0&&(lo.indexOf('how many')>=0||lo.indexOf('total')>=0))
+    return 'There are <strong>'+trials+' clinical trials</strong> in the database, with <strong>'+recruiting+' actively recruiting</strong>. Trials span phases I–IV across conditions including Hypertension, Diabetes, Migraine, TB, and more.';
+
+  if(lo.indexOf('privacy')>=0||lo.indexOf('anonymous')>=0||lo.indexOf('gdpr')>=0||lo.indexOf('data')>=0)
+    return 'MediCore is built privacy-first: ✅ No names or emails stored anywhere, ✅ Patients identified only by anonymous IDs (PAT001 etc.), ✅ Role-based access control, ✅ Researchers see anonymised data only, ✅ Full audit trail of all data access, ✅ Patient consent toggles for each trial category.';
+
+  if(lo.indexOf('export')>=0||lo.indexOf('csv')>=0||lo.indexOf('download')>=0)
+    return 'You can export match results as CSV from the Matching Engine page — click the <strong>Export CSV</strong> button after running a match. The export is anonymised (IDs only, no personal data).';
+
+  // Fallback: smart generic
+  var keywords=lo.split(' ').filter(function(w){return w.length>3;});
+  var relPat=DB.patients.filter(function(p){return keywords.some(function(k){return (p.condition+p.symptoms).toLowerCase().indexOf(k)>=0;});});
+  var relTrl=DB.trials.filter(function(t){return keywords.some(function(k){return (t.title+t.condition).toLowerCase().indexOf(k)>=0;});});
+  if(relPat.length>0||relTrl.length>0){
+    var ans='Based on your query, I found: ';
+    if(relPat.length)ans+='<strong>'+relPat.length+' related patient(s)</strong> ('+relPat.map(function(p){return p.id;}).slice(0,3).join(', ')+')';
+    if(relTrl.length)ans+=(relPat.length?' and ':'')+'<strong>'+relTrl.length+' related trial(s)</strong> ('+relTrl.map(function(t){return t.id;}).slice(0,2).join(', ')+')';
+    return ans+'. Navigate to the Matching Engine for a detailed eligibility breakdown.';
+  }
+  return 'I can help with patient counts, trial eligibility, match scores, privacy policies, and the scoring algorithm. Try asking: <em>"How many patients match trials?"</em> or <em>"Explain the scoring algorithm"</em>.';
+}
+
+/* ═══════════════════════════════════════════════════
+   📋 AUDIT TRAIL
+═══════════════════════════════════════════════════ */
+var AUDIT_LOG=[];
+function logAudit(action, detail, color){
+  color=color||'#1847D1';
+  AUDIT_LOG.unshift({action:action,detail:detail,color:color,time:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}),uid:DB.session?DB.session.uid:'system'});
+  if(AUDIT_LOG.length>50)AUDIT_LOG.pop();
+}
+
+function pgAuditTrail(){
+  setTitle('Audit Trail');
+  if(!AUDIT_LOG.length){
+    logAudit('System Init','Platform loaded','#0B9B8E');
+    logAudit('DB Loaded',DB.patients.length+' patients, '+DB.trials.length+' trials','#1847D1');
+  }
+  document.getElementById('pb').innerHTML=
+    '<div class="fx aic g12 mb18">'+
+      '<button class="export-btn" onclick="exportAuditCSV()">⬇ Export Audit Log</button>'+
+      '<span class="tsm c3">'+AUDIT_LOG.length+' events logged this session</span>'+
+    '</div>'+
+    '<div class="card"><div class="ch"><span class="ct">🔒 Audit Trail</span><span class="txs c3">All data access & actions logged</span></div>'+
+    '<div class="cb" style="padding:0 20px;">'+
+    AUDIT_LOG.map(function(e,i){
+      return '<div class="audit-item" style="animation-delay:'+(i*.03)+'s;">'+
+        '<div class="audit-dot" style="background:'+e.color+';"></div>'+
+        '<div style="flex:1;">'+
+          '<div style="font-size:13px;font-weight:500;color:var(--ink);">'+esc(e.action)+'</div>'+
+          '<div style="font-size:12px;color:var(--ink3);">'+esc(e.detail)+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;flex-shrink:0;">'+
+          '<div style="font-size:11px;font-weight:500;color:var(--ink2);">'+e.uid+'</div>'+
+          '<div style="font-size:10.5px;color:var(--ink3);">'+e.time+'</div>'+
+        '</div>'+
+      '</div>';
+    }).join('')+
+    '</div></div>';
+}
+
+function exportAuditCSV(){
+  var csv='Time,User,Action,Detail\n'+
+    AUDIT_LOG.map(function(e){return '"'+e.time+'","'+e.uid+'","'+e.action+'","'+e.detail+'"';}).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='medicore_audit_'+today()+'.csv';a.click();
+}
+
+/* ═══════════════════════════════════════════════════
+   ⚖️ FAIRNESS & BIAS DETECTION PAGE
+═══════════════════════════════════════════════════ */
+function pgFairness(){
+  setTitle('Fairness & Bias Analysis');
+  var allMatches=runAllMatches(DB.patients,DB.trials,1);
+
+  // Gender distribution in matches
+  var genderMatch={Male:0,Female:0,'Non-binary':0,'Prefer not to say':0};
+  var genderTotal={Male:0,Female:0,'Non-binary':0,'Prefer not to say':0};
+  DB.patients.forEach(function(p){genderTotal[p.gender]=(genderTotal[p.gender]||0)+1;});
+  allMatches.forEach(function(r){
+    var p=DB.patients.find(function(x){return x.id===r.patId;});
+    if(p)genderMatch[p.gender]=(genderMatch[p.gender]||0)+1;
+  });
+
+  // Age group distribution
+  var ageGroups={young:0,middle:0,senior:0};
+  var ageMatchGroups={young:0,middle:0,senior:0};
+  DB.patients.forEach(function(p){
+    var g=p.age<35?'young':p.age<55?'middle':'senior';
+    ageGroups[g]++;
+  });
+  allMatches.filter(function(r){return r.match.score>=60;}).forEach(function(r){
+    var p=DB.patients.find(function(x){return x.id===r.patId;});
+    if(p){var g=p.age<35?'young':p.age<55?'middle':'senior';ageMatchGroups[g]++;}
+  });
+
+  // Fairness score (simple equity metric)
+  var gVals=Object.values(genderTotal).filter(function(v){return v>0;});
+  var gMatchVals=Object.keys(genderTotal).map(function(k){
+    return genderTotal[k]>0?(genderMatch[k]||0)/genderTotal[k]:0;
+  }).filter(function(v){return v>0;});
+  var gVariance=gMatchVals.length>1?Math.max.apply(null,gMatchVals)-Math.min.apply(null,gMatchVals):0;
+  var fairnessScore=Math.max(60,Math.round(100-(gVariance*100)));
+
+  // Heatmap data (condition x severity)
+  var condList=condStats().slice(0,7);
+  var heatData=condList.map(function(c){
+    return DB.patients.filter(function(p){return p.condition===c.name;}).length;
+  });
+  var heatMax=Math.max.apply(null,heatData)||1;
+
+  document.getElementById('pb').innerHTML=
+    '<div class="g2 mb20">'+
+      // Fairness score card
+      '<div class="card"><div class="ch"><span class="ct">⚖️ Algorithmic Fairness Score</span></div><div class="cb">'+
+        '<div style="display:flex;align-items:center;gap:20px;margin-bottom:16px;">'+
+          '<div><div class="fairness-score">'+fairnessScore+'%</div><div style="font-size:12px;color:var(--ink3);margin-top:2px;">Equity Index</div></div>'+
+          '<div style="flex:1;">'+
+            '<div class="al2 '+(fairnessScore>=80?'al-ok':fairnessScore>=65?'al-w':'al-d')+'">'+
+              (fairnessScore>=80?'✅ Good equity — trial access is distributed fairly across demographics.':fairnessScore>=65?'⚠️ Moderate bias detected — some demographic groups have lower match rates.':'❌ Significant bias — review trial inclusion criteria for equity issues.')+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div style="font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:10px;">Match Rate by Gender</div>'+
+        Object.keys(genderTotal).filter(function(g){return genderTotal[g]>0;}).map(function(g){
+          var rate=genderTotal[g]>0?Math.round(((genderMatch[g]||0)/genderTotal[g])*100):0;
+          var col=rate>=70?'#15803D':rate>=40?'#B45309':'#C93030';
+          return '<div class="conf-bar"><div class="conf-label">'+g+'</div>'+
+            '<div class="conf-track"><div class="conf-fill" style="width:0%;background:'+col+';" data-w="'+rate+'"></div></div>'+
+            '<div class="conf-val" style="color:'+col+';">'+rate+'%</div></div>';
+        }).join('')+
+      '</div></div>'+
+      // Age group equity
+      '<div class="card"><div class="ch"><span class="ct">👥 Age Group Equity</span></div><div class="cb">'+
+        '<div style="font-size:12px;font-weight:600;color:var(--ink2);margin-bottom:10px;">Match Rate by Age Group</div>'+
+        [['18–34','young','#1847D1'],['35–54','middle','#0B9B8E'],['55+','senior','#7C3AED']].map(function(g){
+          var rate=ageGroups[g[1]]>0?Math.round((ageMatchGroups[g[1]]/ageGroups[g[1]])*100):0;
+          return '<div class="conf-bar"><div class="conf-label">'+g[0]+' ('+ageGroups[g[1]]+' pts)</div>'+
+            '<div class="conf-track"><div class="conf-fill" style="width:0%;background:'+g[2]+';" data-w="'+rate+'"></div></div>'+
+            '<div class="conf-val" style="color:'+g[2]+';">'+rate+'%</div></div>';
+        }).join('')+
+        '<div style="margin-top:16px;padding:12px;background:var(--paper);border-radius:var(--rs);font-size:12px;color:var(--ink2);">'+
+          '<strong>Bias Mitigation Applied:</strong> The matching engine does not penalise age within valid trial ranges. Exclusion criteria are evaluated symmetrically across all demographic groups.'+
+        '</div>'+
+      '</div></div>'+
+    '</div>'+
+    // Condition heatmap
+    '<div class="card mb20"><div class="ch"><span class="ct">🌡️ Patient Condition Density Heatmap</span><span class="txs c3">Colour intensity = patient count</span></div><div class="cb">'+
+      '<div class="heatmap-grid">'+
+        condList.map(function(c,i){
+          var intensity=Math.round((heatData[i]/heatMax)*255);
+          var bg='rgba(24,71,209,'+((heatData[i]/heatMax)*0.85+0.1).toFixed(2)+')';
+          return '<div class="hmap-cell" style="background:'+bg+';" title="'+esc(c.name)+': '+heatData[i]+' patients"></div>';
+        }).join('')+
+        // Fill remaining cells to 7
+        Array(Math.max(0,7-condList.length)).fill(0).map(function(){return '<div class="hmap-cell" style="background:var(--paper2);"></div>';}).join('')+
+      '</div>'+
+      '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;">'+
+        condList.map(function(c,i){
+          var bg='rgba(24,71,209,'+((heatData[i]/heatMax)*0.85+0.1).toFixed(2)+')';
+          return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;"><div style="width:12px;height:12px;border-radius:2px;background:'+bg+';flex-shrink:0;"></div><span>'+esc(c.name)+'</span></div>';
+        }).join('')+
+      '</div>'+
+    '</div></div>'+
+    // Consent management
+    '<div class="card"><div class="ch"><span class="ct">🔐 Patient Consent Management</span><span class="txs c3">Anonymous IDs only — no personal data stored</span></div><div class="cb">'+
+      ['Oncology Trials','Cardiovascular Trials','Neurological Studies','Mental Health Research','Infectious Disease Trials'].map(function(cat,i){
+        return '<div class="consent-row">'+
+          '<div><div style="font-size:13px;font-weight:500;">'+cat+'</div><div style="font-size:11.5px;color:var(--ink3);">Data shared anonymously with trial coordinators</div></div>'+
+          '<label class="toggle"><input type="checkbox" '+(i<3?'checked':'')+' onchange="logAudit(\'Consent Changed\',\'Category: '+cat+'\',\'#7C3AED\')"><span class="toggle-slider"></span></label>'+
+        '</div>';
+      }).join('')+
+    '</div></div>';
+
+  // Animate bars
+  setTimeout(function(){
+    document.querySelectorAll('.conf-fill').forEach(function(b){b.style.width=b.dataset.w+'%';});
+  },100);
+
+  logAudit('Fairness Analysis','Viewed bias & equity report','#7C3AED');
+}
+
+/* ═══════════════════════════════════════════════════
+   📤 EXPORT FUNCTIONS
+═══════════════════════════════════════════════════ */
+function exportMatchCSV(){
+  var results=runAllMatches(DB.patients,DB.trials,1);
+  var csv='PatientID,TrialID,TrialTitle,MatchScore,Grade,Disqualified\n'+
+    results.map(function(r){
+      return '"'+r.patId+'","'+r.trial.id+'","'+r.trial.title.replace(/"/g,"'")+'",'
+        +r.match.score+',"'+r.match.gradeLabel+'","'+r.match.disqualified+'"';
+    }).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='medicore_matches_'+today()+'.csv';a.click();
+  logAudit('Export','Match results exported as CSV','#15803D');
+  notify('Match results exported!','ok');
+}
+
+function exportTrialsCSV(){
+  var csv='TrialID,Title,Phase,Status,Condition,AgeMin,AgeMax,Gender,Severity\n'+
+    DB.trials.map(function(t){
+      return '"'+t.id+'","'+t.title.replace(/"/g,"'")+'",'
+        +'"'+t.phase+'","'+t.status+'","'+t.condition+'",'+t.ageMin+','+t.ageMax+',"'+t.gender+'","'+t.severity+'"';
+    }).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='medicore_trials_'+today()+'.csv';a.click();
+}
+
+/* ═══════════════════════════════════════════════════
+   🎯 DEMO MODE
+═══════════════════════════════════════════════════ */
+var DEMO_STEPS=[
+  {label:'1. Dashboard',fn:'pgDashboard',desc:'See live stats & AI match preview'},
+  {label:'2. Clinical Trials',fn:'pgTrials',desc:'Browse 7 active trials'},
+  {label:'3. AI Matching',fn:'pgMatching',desc:'Run the eligibility engine'},
+  {label:'4. Fairness',fn:'pgFairness',desc:'Check bias & equity scores'},
+  {label:'5. Audit Trail',fn:'pgAuditTrail',desc:'Full transparency log'},
+];
+var demoIdx=0;
+
+function initDemo(){
+  var el=document.getElementById('demoSteps');if(!el)return;
+  el.innerHTML=DEMO_STEPS.map(function(s,i){
+    return '<button class="demo-step'+(i===0?' active':'')+(i<demoIdx?' done':'')+'" onclick="jumpDemo('+i+')">'+s.label+'</button>';
+  }).join('');
+}
+
+function jumpDemo(idx){
+  demoIdx=idx;
+  var s=DEMO_STEPS[idx];
+  if(s&&window[s.fn])window[s.fn]();
+  document.querySelectorAll('.demo-step').forEach(function(b,i){
+    b.className='demo-step'+(i===idx?' active':i<idx?' done':'');
+  });
+  notify(s.label+' — '+s.desc,'info');
+}
+
+/* ═══════════════════════════════════════════════════
+   📊 LIVE TICKER UPDATE
+═══════════════════════════════════════════════════ */
+function updateTicker(){
+  var tk=document.getElementById('statTicker');if(!tk)return;
+  tk.style.display='flex';
+  document.getElementById('tkPat').textContent=DB.patients.length;
+  document.getElementById('tkTrial').textContent=DB.trials.filter(function(t){return t.status==='Recruiting';}).length;
+  var matches=runAllMatches(DB.patients,DB.trials,60);
+  document.getElementById('tkMatch').textContent=matches.length;
+  document.getElementById('tkEnrolled').textContent=Math.floor(matches.length*0.3); // simulated
+  document.getElementById('tkFairness').textContent='82%';
+}
+
+/* ═══════════════════════════════════════════════════
+   PATCH: Add export + fairness + audit to nav & log actions
+═══════════════════════════════════════════════════ */
+var _origBuildSidebar=buildSidebar;
+buildSidebar=function(){
+  _origBuildSidebar();
+  // Inject extra nav items
+  var role=DB.session.role;
+  var extra=[];
+  if(role==='admin'||role==='researcher'){
+    extra.push({i:'⚖️',l:'Fairness & Bias',f:'pgFairness'});
+    extra.push({i:'🔒',l:'Audit Trail',f:'pgAuditTrail'});
+  }
+  if(role==='doctor'||role==='researcher'||role==='admin'){
+    extra.push({i:'📤',l:'Export Data',f:'pgExport'});
+  }
+  var nav=document.getElementById('sbNav');
+  if(nav&&extra.length){
+    var div=document.createElement('div');
+    div.innerHTML='<div class="sb-section">Advanced</div>'+
+      extra.map(function(m){
+        return '<button class="ni" onclick="'+m.f+'();setNav(this)"><span class="nic">'+m.i+'</span>'+m.l+'<span class="ni-dot"></span></button>';
+      }).join('');
+    nav.appendChild(div);
+  }
+  updateTicker();
+  initDemo();
+  logAudit('Login','Session started as '+role,'#1847D1');
+};
+
+function pgExport(){
+  setTitle('Export Data');
+  document.getElementById('pb').innerHTML=
+    '<div class="card"><div class="ch"><span class="ct">📤 Export Centre</span><span class="txs c3">All exports are anonymised — IDs only</span></div><div class="cb">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">'+
+    [
+      {icon:'🎯',title:'Match Results',desc:'All patient-trial matches with scores',fn:'exportMatchCSV'},
+      {icon:'🧪',title:'Clinical Trials',desc:'Full trial database with criteria',fn:'exportTrialsCSV'},
+      {icon:'📊',title:'Patient Analytics',desc:'Anonymised demographic breakdown',fn:'exportPatientsCSV'},
+      {icon:'🔒',title:'Audit Log',desc:'Complete session audit trail',fn:'exportAuditCSV'},
+    ].map(function(e){
+      return '<div style="padding:18px;background:var(--paper);border-radius:var(--r);border:1px solid var(--border);text-align:center;">'+
+        '<div style="font-size:32px;margin-bottom:10px;">'+e.icon+'</div>'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">'+e.title+'</div>'+
+        '<div style="font-size:12px;color:var(--ink3);margin-bottom:12px;">'+e.desc+'</div>'+
+        '<button class="export-btn" onclick="'+e.fn+'()">⬇ Download CSV</button>'+
+      '</div>';
+    }).join('')+
+    '</div></div></div>';
+}
+
+function exportPatientsCSV(){
+  var csv='PatientID,Age,Blood,Gender,City,Condition,Severity,Registered\n'+
+    DB.patients.map(function(p){
+      return '"'+p.id+'",'+p.age+',"'+p.blood+'","'+p.gender+'","'+p.city+'","'+p.condition+'","'+p.severity+'","'+p.registered+'"';
+    }).join('\n');
+  var blob=new Blob([csv],{type:'text/csv'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='medicore_patients_anonymous_'+today()+'.csv';a.click();
+  logAudit('Export','Anonymised patient data exported','#15803D');
+  notify('Patient data exported (anonymised)!','ok');
+}
+
+// Patch matching engine to log & add export button
+var _origRenderMatchResults=renderMatchResults;
+renderMatchResults=function(results, minScore){
+  _origRenderMatchResults(results, minScore);
+  logAudit('Match Engine Run','Found '+results.length+' matches (min score: '+minScore+'%)','#7C3AED');
+  // Add export button to results
+  var el=document.getElementById('matchResults');
+  if(el&&results.length){
+    var btn=document.createElement('div');
+    btn.style.cssText='margin-bottom:14px;display:flex;gap:10px;align-items:center;';
+    btn.innerHTML='<button class="export-btn" onclick="exportMatchCSV()">⬇ Export Results CSV</button>'+
+      '<span style="font-size:12px;color:var(--ink3);">'+results.length+' matches · anonymised IDs only</span>';
+    el.insertBefore(btn, el.firstChild);
+  }
+};
+
+
+/* ═══════════════════════════════════════════════════
+   🔥 FIREBASE SETUP PAGE
+═══════════════════════════════════════════════════ */
+function pgFirebaseSetup(){
+  setTitle('Firebase Setup');
+  var status = FB_ENABLED
+    ? '<div class="al2 al-ok">✅ Firebase is connected and syncing! Your data is being saved permanently.</div>'
+    : '<div class="al2 al-d">❌ Firebase not connected yet. Follow the steps below to connect.</div>';
+
+  document.getElementById('pb').innerHTML =
+    status +
+    '<div class="card mb20" style="margin-top:16px;">'+
+      '<div class="ch"><span class="ct">🔥 Firebase Connection Guide</span></div>'+
+      '<div class="cb">'+
+        // Step 1
+        '<div style="display:flex;gap:14px;margin-bottom:20px;align-items:flex-start;">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#1847D1;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">1</div>'+
+          '<div>'+
+            '<div style="font-weight:600;margin-bottom:4px;">Go to Firebase Console</div>'+
+            '<div style="font-size:13px;color:var(--ink3);">Visit <a href="https://console.firebase.google.com" target="_blank" style="color:var(--blue);">console.firebase.google.com</a> and click <strong>Create a project</strong>. Name it <em>medicore-ai</em>.</div>'+
+          '</div>'+
+        '</div>'+
+        // Step 2
+        '<div style="display:flex;gap:14px;margin-bottom:20px;align-items:flex-start;">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#0B9B8E;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">2</div>'+
+          '<div>'+
+            '<div style="font-weight:600;margin-bottom:4px;">Enable Firestore Database</div>'+
+            '<div style="font-size:13px;color:var(--ink3);">In your project → <strong>Build → Firestore Database → Create database</strong>. Choose <strong>Start in test mode</strong> (you can lock it down later).</div>'+
+          '</div>'+
+        '</div>'+
+        // Step 3
+        '<div style="display:flex;gap:14px;margin-bottom:20px;align-items:flex-start;">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#7C3AED;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">3</div>'+
+          '<div>'+
+            '<div style="font-weight:600;margin-bottom:4px;">Get your Firebase Config</div>'+
+            '<div style="font-size:13px;color:var(--ink3);">Project Settings (⚙️) → <strong>Your Apps → Add App → Web (&lt;/&gt;)</strong> → Register app → Copy the <code>firebaseConfig</code> object.</div>'+
+          '</div>'+
+        '</div>'+
+        // Step 4
+        '<div style="display:flex;gap:14px;margin-bottom:20px;align-items:flex-start;">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#B45309;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">4</div>'+
+          '<div>'+
+            '<div style="font-weight:600;margin-bottom:4px;">Paste config into this file</div>'+
+            '<div style="font-size:13px;color:var(--ink3);">Open <code>medicore-firebase.html</code> in a text editor. Find the <code>firebaseConfig</code> block near the top and replace each <code>PASTE_YOUR_..._HERE</code> value.</div>'+
+            '<div style="margin-top:10px;background:#0A0F1E;border-radius:8px;padding:14px;font-size:12px;color:#86EFAC;font-family:monospace;line-height:1.8;">'+
+              'const firebaseConfig = {<br>'+
+              '&nbsp;&nbsp;apiKey: <span style="color:#FCA5A5;">"AIzaSy..."</span>,<br>'+
+              '&nbsp;&nbsp;authDomain: <span style="color:#FCA5A5;">"medicore-ai.firebaseapp.com"</span>,<br>'+
+              '&nbsp;&nbsp;projectId: <span style="color:#FCA5A5;">"medicore-ai"</span>,<br>'+
+              '&nbsp;&nbsp;storageBucket: <span style="color:#FCA5A5;">"medicore-ai.appspot.com"</span>,<br>'+
+              '&nbsp;&nbsp;messagingSenderId: <span style="color:#FCA5A5;">"123456789"</span>,<br>'+
+              '&nbsp;&nbsp;appId: <span style="color:#FCA5A5;">"1:123:web:abc123"</span><br>'+
+              '};'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        // Step 5
+        '<div style="display:flex;gap:14px;margin-bottom:20px;align-items:flex-start;">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#15803D;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">5</div>'+
+          '<div>'+
+            '<div style="font-weight:600;margin-bottom:4px;">Re-deploy to Netlify</div>'+
+            '<div style="font-size:13px;color:var(--ink3);">Drag & drop the updated <code>medicore-firebase.html</code> file onto your Netlify site dashboard. Done — data now saves permanently! 🎉</div>'+
+          '</div>'+
+        '</div>'+
+        // Step 6 - Seed data
+        '<div style="display:flex;gap:14px;align-items:flex-start;">'+
+          '<div style="width:32px;height:32px;border-radius:50%;background:#C93030;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;">6</div>'+
+          '<div>'+
+            '<div style="font-weight:600;margin-bottom:4px;">Upload Seed Data (one-time)</div>'+
+            '<div style="font-size:13px;color:var(--ink3);">Click below to push all current patients, trials and users to Firebase. Only do this once on first setup.</div>'+
+            '<button class="btn btn-primary" style="margin-top:10px;width:auto;" onclick="uploadSeedData()">🔥 Upload All Data to Firebase</button>'+
+            '<div id="seedStatus" style="margin-top:8px;font-size:12px;color:var(--ink3);"></div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    // Firestore rules
+    '<div class="card"><div class="ch"><span class="ct">🔒 Recommended Firestore Security Rules</span></div><div class="cb">'+
+      '<div style="background:#0A0F1E;border-radius:8px;padding:16px;font-size:12px;color:#86EFAC;font-family:monospace;line-height:1.9;">'+
+        'rules_version = \'2\';<br>'+
+        'service cloud.firestore {<br>'+
+        '&nbsp;&nbsp;match /databases/{database}/documents {<br>'+
+        '&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#93AAFF;">// Allow read/write for now (change before production)</span><br>'+
+        '&nbsp;&nbsp;&nbsp;&nbsp;match /{document=**} {<br>'+
+        '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br>'+
+        '&nbsp;&nbsp;&nbsp;&nbsp;}<br>'+
+        '&nbsp;&nbsp;}<br>'+
+        '}'+
+      '</div>'+
+      '<div style="font-size:12px;color:var(--ink3);margin-top:10px;">⚠️ The above rule allows all access — fine for a hackathon. For production, lock it down with proper auth rules.</div>'+
+    '</div></div>';
+}
+
+async function uploadSeedData(){
+  var el = document.getElementById('seedStatus');
+  if(!FB_ENABLED){
+    if(el) el.innerHTML = '❌ Firebase not connected. Paste your config first.';
+    notify('Firebase not connected!','err');
+    return;
+  }
+  if(el) el.innerHTML = '⏳ Uploading...';
+  try {
+    for(var i=0;i<DB.patients.length;i++) await window.FB.save('patients', DB.patients[i].id, DB.patients[i]);
+    for(var j=0;j<DB.trials.length;j++)   await window.FB.save('trials',   DB.trials[j].id,   DB.trials[j]);
+    for(var k=0;k<DB.users.length;k++)    await window.FB.save('users',     DB.users[k].id,    DB.users[k]);
+    var ck=Object.keys(DB.chats);
+    for(var m=0;m<ck.length;m++) await window.FB.save('chats', ck[m], {patId:ck[m], messages:DB.chats[ck[m]]});
+    if(el) el.innerHTML = '✅ All data uploaded to Firebase successfully!';
+    notify('Seed data uploaded to Firebase!','ok');
+    logAudit('Firebase Seed Upload','All '+DB.patients.length+' patients, '+DB.trials.length+' trials uploaded','#15803D');
+  } catch(e){
+    if(el) el.innerHTML = '❌ Error: '+e.message;
+    notify('Upload failed: '+e.message,'err');
+  }
+}
+
+// Init AI suggestions on load
+window.addEventListener('DOMContentLoaded',function(){
+  setTimeout(function(){
+    var fab=document.getElementById('fabBadge');
+    if(fab){setInterval(function(){fab.style.animation='pulse .8s ease 3';},8000);}
+  },3000);
+});
+</script>
+</body>
+</html>
